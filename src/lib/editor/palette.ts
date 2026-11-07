@@ -1,0 +1,38 @@
+/**
+ * A compact 32-color palette based on PICO-8 plus a handful of useful
+ * low-saturation tones for UI-friendly pixel work.
+ */
+export const DEFAULT_PALETTE = [
+	"#000000",
+	"#1d2b53",
+	"#7e2553",
+	"#008751",
+	"#ab5236",
+	"#5f574f",
+	"#c2c3c7",
+	"#fff1e8",
+	"#ff004d",
+	"#ffa300",
+	"#ffec27",
+	"#00e436",
+	"#29adff",
+	"#83769c",
+	"#ff77a8",
+	"#ffccaa",
+	"#291814",
+	"#111d35",
+	"#422136",
+	"#125359",
+	"#742f29",
+	"#49333b",
+	"#a28879",
+	"#f3ef7d",
+	"#be1250",
+	"#ff6c24",
+	"#a8e72e",
+	"#00b543",
+	"#065ab5",
+	"#754665",
+	"#ff6e59",
+	"#ff9d81",
+];
