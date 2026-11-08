@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Eye from "@lucide/svelte/icons/eye";
 	import EyeOff from "@lucide/svelte/icons/eye-off";
+	import Lock from "@lucide/svelte/icons/lock";
+	import LockOpen from "@lucide/svelte/icons/lock-open";
 	import { tick } from "svelte";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -58,6 +60,25 @@
 					<Eye class="size-3.5" />
 				{:else}
 					<EyeOff class="size-3.5" />
+				{/if}
+			</Button>
+
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				class={cn(
+					"size-7 shrink-0",
+					layer.locked ? "text-foreground" : "text-muted-foreground",
+				)}
+				title={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+				aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+				aria-pressed={layer.locked}
+				onclick={() => editor.toggleLayerLock(layer.id)}
+			>
+				{#if layer.locked}
+					<Lock class="size-3.5" />
+				{:else}
+					<LockOpen class="size-3.5" />
 				{/if}
 			</Button>
 

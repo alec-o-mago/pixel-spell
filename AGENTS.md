@@ -111,6 +111,7 @@ When adding a tool:
   - Rows are layers, displayed top-to-bottom with `[...editor.doc.layers].reverse()`.
   - Columns are animation frames, plus a trailing add-frame column and a filler column that absorbs extra width.
   - Clicking a cel selects both its layer and frame. Clicking a frame header selects only the frame; clicking a layer name selects only the layer.
+  - The layer header exposes visibility and lock toggles next to the layer name. Locked layers block drawing through `CanvasStage`'s `isDrawable` guard.
   - The header row and the layer column are sticky (`position: sticky`) inside an `overflow-auto` container. Keep `border-separate border-spacing-0` and opaque header backgrounds, or scrolled content will show through.
   - The active frame header is `bg-primary`; the active layer row and active frame column use subtle accent backgrounds; the active cel has a primary ring.
   - The opacity footer below the table controls the active layer.
@@ -140,6 +141,7 @@ Preserve these regions and their relative placement when making changes.
 
 - Project format identifier: `"pixel-spell"`, version `1`.
 - `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user.
+- Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
 - PNG export uses `canvas.toDataURL`; sprite sheets place frames horizontally.
 - `editor.saveToFile()` triggers a browser download and clears the dirty flag.
 
@@ -158,7 +160,7 @@ Preserve these regions and their relative placement when making changes.
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
-- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, frame operations, playback, cel selection, and timeline resizing still work.
+- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.
 - New UI matches the existing modern shadcn aesthetic and respects the layout contract.
 - Update `README.md` when user-facing behavior or shortcuts change.

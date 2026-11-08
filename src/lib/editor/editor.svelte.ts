@@ -255,6 +255,7 @@ export class EditorState {
 		const layer = this.doc.layers.find((item) => item.id === id);
 		if (!layer) return;
 		layer.locked = !layer.locked;
+		this.dirty = true;
 	}
 
 	renameLayer(id: string, name: string): void {

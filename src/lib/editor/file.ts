@@ -7,6 +7,7 @@ interface SerializedLayer {
 	id: string;
 	name: string;
 	visible: boolean;
+	locked: boolean;
 	opacity: number;
 	cels: string[];
 }
@@ -140,6 +141,7 @@ export function serializeProject(
 			id: layer.id,
 			name: layer.name,
 			visible: layer.visible,
+			locked: layer.locked,
 			opacity: layer.opacity,
 			cels: layer.cels.map(encodePixels),
 		})),
@@ -188,7 +190,7 @@ export function parseProject(raw: string): LoadedProject | null {
 						? rawLayer.name
 						: `Layer ${index + 1}`,
 				visible: rawLayer?.visible !== false,
-				locked: false,
+				locked: rawLayer?.locked === true,
 				opacity: clamp(Number(rawLayer?.opacity ?? 1), 0, 1),
 				cels,
 			};

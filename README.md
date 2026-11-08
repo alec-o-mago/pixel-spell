@@ -8,7 +8,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 - **Drawing tools** — pencil, eraser, line, rectangle, ellipse, paint bucket, and eyedropper.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, X/Y symmetry, fill tolerance and contiguous fill, and layer-aware color sampling.
-- **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
+- **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — hex input, native color picker, alpha slider, and a 32-color palette you can extend.
 - **History** — 80-step undo/redo stack with keyboard shortcuts.
@@ -94,7 +94,7 @@ A document is a `PixelDoc`:
 
 - `width`, `height`, `fps`
 - `frames[]` — animation frames
-- `layers[]` — ordered bottom-to-top; each layer has visibility, opacity, and one `Uint32Array` cel per frame
+- `layers[]` — ordered bottom-to-top; each layer has visibility, opacity, lock state, and one `Uint32Array` cel per frame
 
 Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written directly into `ImageData` for rendering and PNG export. Transparent pixels are `0`.
 
