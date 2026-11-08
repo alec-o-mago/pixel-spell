@@ -57,6 +57,12 @@ export const TOOLS: ToolDef[] = [
 		shortcut: "B",
 	},
 	{
+		id: "spray",
+		label: "Spray",
+		description: "Scatter random pixels in a round area",
+		shortcut: "S",
+	},
+	{
 		id: "eraser",
 		label: "Eraser",
 		description: "Erase pixels to transparency",
@@ -97,6 +103,18 @@ export const TOOLS: ToolDef[] = [
 		label: "Eyedropper",
 		description: "Pick a color from the canvas",
 		shortcut: "I",
+	},
+	{
+		id: "blur",
+		label: "Blur",
+		description: "Soften pixels in a round area",
+		shortcut: "K",
+	},
+	{
+		id: "jumble",
+		label: "Jumble",
+		description: "Scramble pixels in a round area",
+		shortcut: "J",
 	},
 ];
 

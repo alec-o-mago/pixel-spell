@@ -56,6 +56,12 @@ export class EditorState {
 	palette = $state<string[]>([...DEFAULT_PALETTE]);
 
 	brushSize = $state(1);
+	sprayRadius = $state(6);
+	sprayRate = $state(40);
+	blurRadius = $state(4);
+	blurPower = $state(50);
+	jumbleRadius = $state(4);
+	jumblePower = $state(100);
 	mirrorX = $state(false);
 	mirrorY = $state(false);
 	mirrorDiagonalDown = $state(false);

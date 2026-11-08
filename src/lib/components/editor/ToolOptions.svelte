@@ -108,6 +108,87 @@
 					</span>
 					<Switch bind:checked={editor.sampleAllLayers} />
 				</label>
+			{:else if editor.tool === "spray"}
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Spray radius</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.sprayRadius}px
+						</span>
+					</div>
+					<Slider type="single" min={1} max={32} step={1} bind:value={editor.sprayRadius} />
+				</div>
+
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Pixel speed</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.sprayRate} px/s
+						</span>
+					</div>
+					<Slider type="single" min={1} max={200} step={1} bind:value={editor.sprayRate} />
+					<p class="text-[10px] leading-snug text-muted-foreground">
+						Hold the pointer still to keep scattering pixels across the round area.
+					</p>
+				</div>
+			{:else if editor.tool === "blur"}
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Area radius</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.blurRadius}px
+						</span>
+					</div>
+					<Slider type="single" min={1} max={32} step={1} bind:value={editor.blurRadius} />
+				</div>
+
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Blur power</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.blurPower}%
+						</span>
+					</div>
+					<Slider type="single" min={1} max={100} step={1} bind:value={editor.blurPower} />
+					<p class="text-[10px] leading-snug text-muted-foreground">
+						Pass over an area repeatedly to soften it further.
+					</p>
+				</div>
+			{:else if editor.tool === "jumble"}
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Area radius</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.jumbleRadius}px
+						</span>
+					</div>
+					<Slider type="single" min={1} max={32} step={1} bind:value={editor.jumbleRadius} />
+				</div>
+
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Scramble power</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.jumblePower}%
+						</span>
+					</div>
+					<Slider type="single" min={1} max={100} step={1} bind:value={editor.jumblePower} />
+					<p class="text-[10px] leading-snug text-muted-foreground">
+						Higher values swap more pixels inside the round area on every pass.
+					</p>
+				</div>
 			{:else if editor.tool === "fill"}
 				<div class="space-y-2.5">
 					<div class="flex items-center justify-between">

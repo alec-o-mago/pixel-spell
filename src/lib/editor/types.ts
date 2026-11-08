@@ -7,13 +7,16 @@ export type ToolId =
 	| "lasso"
 	| "select-color"
 	| "pencil"
+	| "spray"
 	| "eraser"
 	| "line"
 	| "curve"
 	| "rectangle"
 	| "ellipse"
 	| "fill"
-	| "eyedropper";
+	| "eyedropper"
+	| "blur"
+	| "jumble";
 
 /** Which mouse button a color is assigned to. */
 export type ColorSlot = "primary" | "secondary";

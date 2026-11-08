@@ -6,7 +6,8 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 ## Features
 
-- **Drawing tools** — pencil, eraser, line, curve, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. The curve tool starts with a dragged base line, then two clicks place its control points.
+- **Drawing tools** — pencil, spray, eraser, line, curve, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
+- **Area effects** — the blur and jumble tools soften or scramble pixels inside a round area as you pass over them, with adjustable radius and power.
 - **Selections** — magic wand (with optional diagonal connections), separate rectangle and ellipse marquee tools, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; hold `Shift` while making another selection to add it to the current one. Edits are clipped to the selected area, and `Delete` clears the selected pixels. Deselect with the panel button or `Esc`.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, layer-aware color sampling, and selection options. The top bar's alpha-lock toggle prevents painting over fully transparent pixels.
 - **Pixel perfect** — optional corner-pixel removal for smoother pencil, eraser, and curve strokes.
@@ -61,6 +62,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Lasso               | `Q`                      |
 | Select by color     | `C`                      |
 | Pencil              | `B`                      |
+| Spray               | `S`                      |
 | Eraser              | `E`                      |
 | Line                | `L`                      |
 | Curve               | `U`                      |
@@ -68,6 +70,8 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Ellipse             | `O`                      |
 | Fill                | `G`                      |
 | Eyedropper          | `I`                      |
+| Blur                | `K`                      |
+| Jumble              | `J`                      |
 | Undo / redo         | `Ctrl+Z` / `Ctrl+Shift+Z` |
 | New sprite          | `Ctrl+N`                 |
 | Save project        | `Ctrl+S`                 |

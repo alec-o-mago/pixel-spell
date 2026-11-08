@@ -16,6 +16,7 @@
 				{ label: "Lasso", keys: "Q" },
 				{ label: "Select by color", keys: "C" },
 				{ label: "Pencil", keys: "B" },
+				{ label: "Spray", keys: "S" },
 				{ label: "Eraser", keys: "E" },
 				{ label: "Fill", keys: "G" },
 				{ label: "Eyedropper", keys: "I" },
@@ -23,6 +24,8 @@
 				{ label: "Curve", keys: "U" },
 				{ label: "Rectangle", keys: "R" },
 				{ label: "Ellipse", keys: "O" },
+				{ label: "Blur", keys: "K" },
+				{ label: "Jumble", keys: "J" },
 			],
 		},
 		{

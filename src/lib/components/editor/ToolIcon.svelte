@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Circle from "@lucide/svelte/icons/circle";
 	import CircleDashed from "@lucide/svelte/icons/circle-dashed";
+	import Dices from "@lucide/svelte/icons/dices";
+	import Droplets from "@lucide/svelte/icons/droplets";
 	import Eraser from "@lucide/svelte/icons/eraser";
 	import Hand from "@lucide/svelte/icons/hand";
 	import LassoSelect from "@lucide/svelte/icons/lasso-select";
@@ -9,6 +11,7 @@
 	import Pipette from "@lucide/svelte/icons/pipette";
 	import Slash from "@lucide/svelte/icons/slash";
 	import Spline from "@lucide/svelte/icons/spline";
+	import SprayCan from "@lucide/svelte/icons/spray-can";
 	import Square from "@lucide/svelte/icons/square";
 	import SquareDashed from "@lucide/svelte/icons/square-dashed";
 	import SwatchBook from "@lucide/svelte/icons/swatch-book";
@@ -35,6 +38,8 @@
 	<SwatchBook class={className} />
 {:else if tool === "pencil"}
 	<Pencil class={className} />
+{:else if tool === "spray"}
+	<SprayCan class={className} />
 {:else if tool === "eraser"}
 	<Eraser class={className} />
 {:else if tool === "line"}
@@ -47,6 +52,10 @@
 	<Circle class={className} />
 {:else if tool === "fill"}
 	<PaintBucket class={className} />
+{:else if tool === "blur"}
+	<Droplets class={className} />
+{:else if tool === "jumble"}
+	<Dices class={className} />
 {:else}
 	<Pipette class={className} />
 {/if}

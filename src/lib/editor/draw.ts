@@ -350,3 +350,243 @@ export function fillPixels(
 
 	return changed;
 }
+
+/** Scatters `count` random pixels inside a disk, honoring symmetry and clipping. */
+export function sprayPixels(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	centerX: number,
+	centerY: number,
+	radius: number,
+	count: number,
+	color: number,
+	mirrors: readonly MirrorAxis[] = [],
+	clip: Uint8Array | null = null,
+	lockAlpha = false,
+): boolean {
+	const span = Math.max(1, radius);
+	let changed = false;
+
+	const set = (px: number, py: number) => {
+		if (px < 0 || px >= width || py < 0 || py >= height) return;
+		const index = py * width + px;
+		if (clip && !clip[index]) return;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) return;
+		if (cel[index] === color) return;
+		cel[index] = color;
+		changed = true;
+	};
+
+	const shots = Math.max(1, Math.round(count));
+	for (let shot = 0; shot < shots; shot++) {
+		const angle = Math.random() * Math.PI * 2;
+		const distance = Math.sqrt(Math.random()) * span;
+		const x = Math.round(centerX + Math.cos(angle) * distance);
+		const y = Math.round(centerY + Math.sin(angle) * distance);
+		forEachMirroredPoint(x, y, width, height, mirrors, set);
+	}
+
+	return changed;
+}
+
+const BLUR_WEIGHTS = [1, 2, 1, 2, 4, 2, 1, 2, 1];
+const BLUR_TOTAL_WEIGHT = 16;
+
+function lerp(from: number, to: number, amount: number): number {
+	return from + (to - from) * amount;
+}
+
+/**
+ * Blurs every pixel inside a disk using a 3×3 Gaussian kernel. `power` (0–100)
+ * controls how much of the blurred result replaces each pixel, so repeated
+ * passes over the same spot soften it further.
+ */
+export function blurPixels(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	centerX: number,
+	centerY: number,
+	radius: number,
+	power: number,
+	clip: Uint8Array | null = null,
+	lockAlpha = false,
+): boolean {
+	const span = Math.max(1, Math.round(radius));
+	const strength = Math.max(0, Math.min(1, power / 100));
+	if (strength <= 0) return false;
+
+	// Read every sample from an untouched snapshot so a single pass cannot
+	// feed its own output back into the kernel.
+	const source = new Uint32Array(cel);
+	const minX = Math.max(0, centerX - span);
+	const maxX = Math.min(width - 1, centerX + span);
+	const minY = Math.max(0, centerY - span);
+	const maxY = Math.min(height - 1, centerY + span);
+	const radiusSquared = span * span;
+	let changed = false;
+
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) {
+			const dx = x - centerX;
+			const dy = y - centerY;
+			if (dx * dx + dy * dy > radiusSquared) continue;
+
+			const index = y * width + x;
+			if (clip && !clip[index]) continue;
+
+			const original = source[index]!;
+			const originalAlpha = original >>> 24;
+			if (lockAlpha && originalAlpha === 0) continue;
+
+			let sumAlpha = 0;
+			let sumRed = 0;
+			let sumGreen = 0;
+			let sumBlue = 0;
+
+			for (let kernelY = -1; kernelY <= 1; kernelY++) {
+				const sampleY = y + kernelY;
+				if (sampleY < 0 || sampleY >= height) continue;
+				for (let kernelX = -1; kernelX <= 1; kernelX++) {
+					const sampleX = x + kernelX;
+					if (sampleX < 0 || sampleX >= width) continue;
+
+					const weight =
+						BLUR_WEIGHTS[(kernelY + 1) * 3 + (kernelX + 1)]!;
+					const sample = source[sampleY * width + sampleX]!;
+					const alpha = sample >>> 24;
+					if (alpha === 0) continue;
+
+					sumAlpha += alpha * weight;
+					sumRed += (sample & 0xff) * alpha * weight;
+					sumGreen += ((sample >>> 8) & 0xff) * alpha * weight;
+					sumBlue += ((sample >>> 16) & 0xff) * alpha * weight;
+				}
+			}
+
+			if (sumAlpha === 0) continue;
+
+			const blurredAlpha = sumAlpha / BLUR_TOTAL_WEIGHT;
+			const blurredRed = sumRed / sumAlpha;
+			const blurredGreen = sumGreen / sumAlpha;
+			const blurredBlue = sumBlue / sumAlpha;
+
+			const originalRed = original & 0xff;
+			const originalGreen = (original >>> 8) & 0xff;
+			const originalBlue = (original >>> 16) & 0xff;
+
+			// Blend premultiplied colors so transparent neighbors do not leave
+			// dark fringes around softened edges.
+			const originalPremultipliedRed = originalRed * originalAlpha;
+			const originalPremultipliedGreen = originalGreen * originalAlpha;
+			const originalPremultipliedBlue = originalBlue * originalAlpha;
+			const blurredPremultipliedRed = blurredRed * blurredAlpha;
+			const blurredPremultipliedGreen = blurredGreen * blurredAlpha;
+			const blurredPremultipliedBlue = blurredBlue * blurredAlpha;
+
+			const nextAlpha = Math.round(
+				lerp(originalAlpha, blurredAlpha, strength),
+			);
+			const nextPremultipliedRed = lerp(
+				originalPremultipliedRed,
+				blurredPremultipliedRed,
+				strength,
+			);
+			const nextPremultipliedGreen = lerp(
+				originalPremultipliedGreen,
+				blurredPremultipliedGreen,
+				strength,
+			);
+			const nextPremultipliedBlue = lerp(
+				originalPremultipliedBlue,
+				blurredPremultipliedBlue,
+				strength,
+			);
+
+			const nextRed =
+				nextAlpha > 0
+					? Math.max(0, Math.min(255, Math.round(nextPremultipliedRed / nextAlpha)))
+					: 0;
+			const nextGreen =
+				nextAlpha > 0
+					? Math.max(0, Math.min(255, Math.round(nextPremultipliedGreen / nextAlpha)))
+					: 0;
+			const nextBlue =
+				nextAlpha > 0
+					? Math.max(0, Math.min(255, Math.round(nextPremultipliedBlue / nextAlpha)))
+					: 0;
+
+			const next =
+				((nextAlpha << 24) |
+					(nextBlue << 16) |
+					(nextGreen << 8) |
+					nextRed) >>>
+				0;
+
+			if (next === original) continue;
+			cel[index] = next;
+			changed = true;
+		}
+	}
+
+	return changed;
+}
+
+/**
+ * Randomly swaps pixels inside a disk. `power` (0–100) controls how many
+ * swaps are performed relative to the number of pixels in the area.
+ */
+export function jumblePixels(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	centerX: number,
+	centerY: number,
+	radius: number,
+	power: number,
+	clip: Uint8Array | null = null,
+	lockAlpha = false,
+): boolean {
+	const span = Math.max(1, Math.round(radius));
+	const strength = Math.max(0, Math.min(1, power / 100));
+	if (strength <= 0) return false;
+
+	const minX = Math.max(0, centerX - span);
+	const maxX = Math.min(width - 1, centerX + span);
+	const minY = Math.max(0, centerY - span);
+	const maxY = Math.min(height - 1, centerY + span);
+	const radiusSquared = span * span;
+	const indices: number[] = [];
+
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) {
+			const dx = x - centerX;
+			const dy = y - centerY;
+			if (dx * dx + dy * dy > radiusSquared) continue;
+
+			const index = y * width + x;
+			if (clip && !clip[index]) continue;
+			if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
+			indices.push(index);
+		}
+	}
+
+	if (indices.length < 2) return false;
+
+	const swaps = Math.max(1, Math.round(indices.length * strength));
+	let changed = false;
+
+	for (let swap = 0; swap < swaps; swap++) {
+		const a = indices[Math.floor(Math.random() * indices.length)]!;
+		const b = indices[Math.floor(Math.random() * indices.length)]!;
+		if (a === b || cel[a] === cel[b]) continue;
+
+		const value = cel[a]!;
+		cel[a] = cel[b]!;
+		cel[b] = value;
+		changed = true;
+	}
+
+	return changed;
+}

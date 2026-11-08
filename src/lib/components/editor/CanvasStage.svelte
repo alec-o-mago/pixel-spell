@@ -8,13 +8,16 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import { compositeFrame } from "$lib/editor/doc.js";
 	import {
+		blurPixels,
 		fillPixels,
+		jumblePixels,
 		paintBrush,
 		paintPixel,
 		plotCubicCurve,
 		plotEllipse,
 		plotLine,
 		plotRectangle,
+		sprayPixels,
 	} from "$lib/editor/draw.js";
 	import {
 		colorSelectionMask,
@@ -43,6 +46,10 @@
 	let strokeColor = 0;
 	let strokePath: Point[] = [];
 	let strokePixelPerfect = false;
+
+	let sprayTimer: ReturnType<typeof setInterval> | null = null;
+	let sprayAccumulator = 0;
+	let sprayLastTick = 0;
 
 	type CurvePhase = "idle" | "base" | "adjust1" | "adjust2";
 	let curvePhase: CurvePhase = "idle";
@@ -97,6 +104,16 @@
 			: 1,
 	);
 	let cursorOffset = $derived(Math.floor((brushCursorSize - 1) / 2));
+
+	let areaToolRadius = $derived(
+		editor.tool === "spray"
+			? editor.sprayRadius
+			: editor.tool === "blur"
+				? editor.blurRadius
+				: editor.tool === "jumble"
+					? editor.jumbleRadius
+					: 0,
+	);
 
 	let showBrushCursor = $derived(
 		!draggingMirror &&
@@ -170,12 +187,14 @@
 
 	$effect(() => {
 		const tool = editor.tool;
+		if (tool !== "spray") stopSpray();
 		if (tool !== "lasso") resetLasso();
 		if (tool !== "curve" && curvePhase !== "idle") finishCurve();
 	});
 
 	$effect(() => {
 		editor.activeProjectId;
+		stopSpray();
 		resetLasso();
 		resetCurveState(false);
 		selecting = false;
@@ -189,6 +208,7 @@
 
 	$effect(() => {
 		editor.historyActionRevision;
+		stopSpray();
 		if (curvePhase !== "idle") resetCurveState(false);
 	});
 
@@ -305,6 +325,85 @@
 			editor.selection,
 			editor.lockAlpha,
 		);
+	}
+
+	function sprayAt(cel: Uint32Array, point: Point, count: number): boolean {
+		return sprayPixels(
+			cel,
+			editor.doc.width,
+			editor.doc.height,
+			point.x,
+			point.y,
+			editor.sprayRadius,
+			count,
+			strokeColor,
+			editor.mirrorAxes,
+			editor.selection,
+			editor.lockAlpha,
+		);
+	}
+
+	function applyAreaTool(cel: Uint32Array, point: Point): boolean {
+		if (editor.tool === "blur") {
+			return blurPixels(
+				cel,
+				editor.doc.width,
+				editor.doc.height,
+				point.x,
+				point.y,
+				editor.blurRadius,
+				editor.blurPower,
+				editor.selection,
+				editor.lockAlpha,
+			);
+		}
+		if (editor.tool === "jumble") {
+			return jumblePixels(
+				cel,
+				editor.doc.width,
+				editor.doc.height,
+				point.x,
+				point.y,
+				editor.jumbleRadius,
+				editor.jumblePower,
+				editor.selection,
+				editor.lockAlpha,
+			);
+		}
+		return false;
+	}
+
+	function stopSpray(): void {
+		if (sprayTimer !== null) {
+			clearInterval(sprayTimer);
+			sprayTimer = null;
+		}
+		sprayAccumulator = 0;
+	}
+
+	function startSpray(): void {
+		stopSpray();
+		sprayLastTick = performance.now();
+		sprayTimer = setInterval(() => {
+			if (!drawing || editor.tool !== "spray") {
+				stopSpray();
+				return;
+			}
+
+			const point = last;
+			const cel = editor.activeLayer.cels[editor.activeFrame];
+			if (!point || !cel) return;
+
+			const now = performance.now();
+			const elapsed = Math.min(0.25, (now - sprayLastTick) / 1000);
+			sprayLastTick = now;
+			sprayAccumulator += editor.sprayRate * elapsed;
+			const count = Math.floor(sprayAccumulator);
+			if (count < 1) return;
+			sprayAccumulator -= count;
+
+			if (sprayAt(cel, point, Math.min(count, 128))) editor.touch();
+		}, 30);
 	}
 
 	function drawShape(cel: Uint32Array, end: Point): void {
@@ -1017,7 +1116,14 @@
 		strokePixelPerfect = editor.pixelPerfect && usesPixelPerfect(tool);
 		strokePath = strokePixelPerfect ? [point] : [];
 
-		if (tool === "pencil" || tool === "eraser") {
+		if (tool === "spray") {
+			sprayAt(cel, point, 1);
+			startSpray();
+			editor.touch();
+		} else if (tool === "blur" || tool === "jumble") {
+			applyAreaTool(cel, point);
+			editor.touch();
+		} else if (tool === "pencil" || tool === "eraser") {
 			paintAt(cel, point.x, point.y);
 			editor.touch();
 		} else {
@@ -1120,6 +1226,13 @@
 				plotLine(from.x, from.y, point.x, point.y, (x, y) => paintAt(cel, x, y));
 				last = point;
 			}
+		} else if (editor.tool === "spray") {
+			last = point;
+		} else if (editor.tool === "blur" || editor.tool === "jumble") {
+			if (!last || last.x !== point.x || last.y !== point.y) {
+				last = point;
+				applyAreaTool(cel, point);
+			}
 		} else {
 			drawShape(cel, point);
 		}
@@ -1185,6 +1298,7 @@
 		}
 
 		if (drawing) {
+			stopSpray();
 			drawing = false;
 			backup = null;
 			start = null;
@@ -1242,13 +1356,23 @@
 				{/if}
 
 				{#if editor.cursor && isDrawable && showBrushCursor}
-					<div
-						class="pointer-events-none absolute border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
-						style:left={`${(editor.cursor.x - cursorOffset) * zoom}px`}
-						style:top={`${(editor.cursor.y - cursorOffset) * zoom}px`}
-						style:width={`${brushCursorSize * zoom}px`}
-						style:height={`${brushCursorSize * zoom}px`}
-					></div>
+					{#if areaToolRadius > 0}
+						<div
+							class="pointer-events-none absolute rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
+							style:left={`${(editor.cursor.x - areaToolRadius) * zoom}px`}
+							style:top={`${(editor.cursor.y - areaToolRadius) * zoom}px`}
+							style:width={`${(areaToolRadius * 2 + 1) * zoom}px`}
+							style:height={`${(areaToolRadius * 2 + 1) * zoom}px`}
+						></div>
+					{:else}
+						<div
+							class="pointer-events-none absolute border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
+							style:left={`${(editor.cursor.x - cursorOffset) * zoom}px`}
+							style:top={`${(editor.cursor.y - cursorOffset) * zoom}px`}
+							style:width={`${brushCursorSize * zoom}px`}
+							style:height={`${brushCursorSize * zoom}px`}
+						></div>
+					{/if}
 				{/if}
 			</div>
 		</div>
