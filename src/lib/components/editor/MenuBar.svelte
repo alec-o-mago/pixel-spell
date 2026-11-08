@@ -54,7 +54,7 @@
 			window.alert("That file could not be opened as a Pixel Spell project.");
 			return;
 		}
-		editor.loadProject(project);
+		editor.openProject(project);
 	}
 
 	function exportPng(): void {
@@ -193,13 +193,6 @@
 	</nav>
 
 	<div class="ml-auto flex items-center gap-2 pr-1">
-		<span class="hidden items-center gap-1.5 text-[11px] text-muted-foreground sm:flex">
-			<span class="max-w-36 truncate">{editor.name}</span>
-			{#if editor.dirty}
-				<span class="size-1.5 rounded-full bg-primary" title="Unsaved changes"></span>
-			{/if}
-		</span>
-
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}

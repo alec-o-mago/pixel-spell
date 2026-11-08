@@ -11,9 +11,10 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — hex input, native color picker, alpha slider, and a 32-color palette you can extend.
-- **History** — 80-step undo/redo stack with keyboard shortcuts.
+- **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
-- **Projects** — save and open portable `.pixelspell.json` files.
+- **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
+- **Projects** — save and open portable `.pixelspell.json` files; opened files get their own tab.
 - **Canvas controls** — fit-to-window or manual zoom, pixel grid, and a live cursor preview.
 - **Light and dark themes**, persisted in `localStorage`.
 
@@ -88,6 +89,8 @@ src/
         └── tools.ts            # Tool metadata and shortcuts
 ```
 
+The project tab strip lives in `components/editor/ProjectTabs.svelte`; the editor core keeps one session per project in `editor.svelte.ts`.
+
 ## Data model
 
 A document is a `PixelDoc`:
@@ -100,8 +103,13 @@ Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written 
 
 Project files store each cel as a base64 string, so they are portable between browsers and easy to inspect.
 
+Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, undo history, and dirty state. Tool, color, palette, theme, and timeline-height settings are shared across the workspace.
+
 ## Notes and limitations
 
+- Open project tabs are kept in memory; reloading the page starts with a single new `Untitled` project.
+- Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
+- **File → New sprite** and **File → Open project** create new tabs; **File → Save project** saves the active project.
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no selection or move tool yet.

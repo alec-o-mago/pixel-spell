@@ -31,6 +31,13 @@ export interface PixelDoc {
 	layers: Layer[];
 }
 
+export interface ProjectTab {
+	id: string;
+	name: string;
+	dirty: boolean;
+	modified: boolean;
+}
+
 export interface Point {
 	x: number;
 	y: number;

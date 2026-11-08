@@ -20,7 +20,7 @@
 	function create(): void {
 		const w = Number.isFinite(width) ? width : 32;
 		const h = Number.isFinite(height) ? height : 32;
-		editor.newDocument(w, h);
+		editor.newProject(w, h);
 		open = false;
 	}
 </script>
@@ -78,8 +78,8 @@
 			</div>
 
 			<p class="text-xs text-muted-foreground">
-				Canvas size can be between 1 and 256 pixels. Creating a new sprite clears the
-				undo history.
+				Canvas size can be between 1 and 256 pixels. This opens a new project tab and
+				keeps the current project open.
 			</p>
 		</div>
 

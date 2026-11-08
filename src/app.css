@@ -201,3 +201,11 @@ canvas {
 ::selection {
 	background: color-mix(in oklch, var(--primary) 25%, transparent);
 }
+
+.no-scrollbar {
+	scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+	display: none;
+}

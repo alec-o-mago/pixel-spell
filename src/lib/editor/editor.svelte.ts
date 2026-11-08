@@ -1,8 +1,15 @@
 import { normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
-import { saveProjectFile } from "./file.js";
+import { saveProjectFile, type LoadedProject } from "./file.js";
 import { DEFAULT_PALETTE } from "./palette.js";
-import type { Layer, PixelDoc, Point, ToolId, ViewportSize } from "./types.js";
+import type {
+	Layer,
+	PixelDoc,
+	Point,
+	ProjectTab,
+	ToolId,
+	ViewportSize,
+} from "./types.js";
 
 const HISTORY_LIMIT = 80;
 const MIN_SIZE = 1;
@@ -19,6 +26,15 @@ function readStoredTheme(): "light" | "dark" {
 	} catch {
 		return "light";
 	}
+}
+
+interface ProjectSnapshot {
+	doc: PixelDoc;
+	activeLayerId: string;
+	activeFrame: number;
+	zoom: number | null;
+	undo: PixelDoc[];
+	redo: PixelDoc[];
 }
 
 export class EditorState {
@@ -48,13 +64,39 @@ export class EditorState {
 	cursor = $state<Point | null>(null);
 	revision = $state(0);
 	dirty = $state(false);
+	modified = $state(false);
 	name = $state("Untitled");
+
+	projects = $state<ProjectTab[]>([]);
+	activeProjectId = $state("");
 
 	undoCount = $state(0);
 	redoCount = $state(0);
 
 	#undo: PixelDoc[] = [];
 	#redo: PixelDoc[] = [];
+	#states = new Map<string, ProjectSnapshot>();
+
+	constructor() {
+		const id = uid("project");
+		this.projects = [
+			{
+				id,
+				name: this.name,
+				dirty: this.dirty,
+				modified: this.modified,
+			},
+		];
+		this.activeProjectId = id;
+		this.#states.set(id, {
+			doc: this.doc,
+			activeLayerId: this.activeLayerId,
+			activeFrame: this.activeFrame,
+			zoom: this.zoom,
+			undo: [],
+			redo: [],
+		});
+	}
 
 	get activeLayer(): Layer {
 		return (
@@ -132,6 +174,8 @@ export class EditorState {
 
 	touch(): void {
 		this.revision++;
+		this.dirty = true;
+		this.modified = true;
 	}
 
 	pushHistory(): void {
@@ -141,6 +185,7 @@ export class EditorState {
 		this.undoCount = this.#undo.length;
 		this.redoCount = 0;
 		this.dirty = true;
+		this.modified = true;
 	}
 
 	undo(): void {
@@ -171,60 +216,150 @@ export class EditorState {
 		this.playing = false;
 		this.revision++;
 		this.dirty = true;
+		this.modified = true;
 	}
 
-	clearHistory(): void {
-		this.#undo = [];
-		this.#redo = [];
-		this.undoCount = 0;
-		this.redoCount = 0;
+	#syncActiveProject(): void {
+		const tab = this.projects.find((project) => project.id === this.activeProjectId);
+		const snapshot = this.#states.get(this.activeProjectId);
+		if (!tab || !snapshot) return;
+
+		tab.name = this.name;
+		tab.dirty = this.dirty;
+		tab.modified = this.modified;
+		snapshot.doc = this.doc;
+		snapshot.activeLayerId = this.activeLayerId;
+		snapshot.activeFrame = this.activeFrame;
+		snapshot.zoom = this.zoom;
+		snapshot.undo = this.#undo;
+		snapshot.redo = this.#redo;
 	}
 
-	newDocument(width: number, height: number): void {
+	#activateProject(id: string): void {
+		const tab = this.projects.find((project) => project.id === id);
+		const snapshot = this.#states.get(id);
+		if (!tab || !snapshot) return;
+
+		this.activeProjectId = id;
+		this.doc = snapshot.doc;
+		this.activeLayerId = snapshot.activeLayerId;
+		this.activeFrame = snapshot.activeFrame;
+		this.zoom = snapshot.zoom;
+		this.name = tab.name;
+		this.dirty = tab.dirty;
+		this.modified = tab.modified;
+		this.#undo = snapshot.undo;
+		this.#redo = snapshot.redo;
+		this.undoCount = snapshot.undo.length;
+		this.redoCount = snapshot.redo.length;
+		this.cursor = null;
+		this.playing = false;
+		this.revision++;
+	}
+
+	#nextUntitledName(): string {
+		const names = new Set(
+			this.projects.map((project) =>
+				project.id === this.activeProjectId ? this.name : project.name,
+			),
+		);
+		if (!names.has("Untitled")) return "Untitled";
+		let index = 2;
+		while (names.has(`Untitled ${index}`)) index++;
+		return `Untitled ${index}`;
+	}
+
+	isProjectDirty(id: string): boolean {
+		if (id === this.activeProjectId) return this.dirty;
+		return this.projects.find((project) => project.id === id)?.dirty ?? false;
+	}
+
+	isProjectModified(id: string): boolean {
+		if (id === this.activeProjectId) return this.modified;
+		return this.projects.find((project) => project.id === id)?.modified ?? false;
+	}
+
+	projectName(id: string): string {
+		if (id === this.activeProjectId) return this.name;
+		return this.projects.find((project) => project.id === id)?.name ?? "Untitled";
+	}
+
+	selectProject(id: string): void {
+		if (id === this.activeProjectId) return;
+		if (!this.projects.some((project) => project.id === id)) return;
+		this.#syncActiveProject();
+		this.#activateProject(id);
+	}
+
+	closeProject(id: string): void {
+		const index = this.projects.findIndex((project) => project.id === id);
+		if (index < 0) return;
+		if (this.projects.length === 1 && !this.isProjectModified(id)) return;
+
+		const wasActive = id === this.activeProjectId;
+		this.projects.splice(index, 1);
+		this.#states.delete(id);
+
+		if (this.projects.length === 0) {
+			this.newProject(32, 32);
+			return;
+		}
+
+		if (wasActive) {
+			const next = this.projects[Math.min(index, this.projects.length - 1)]!;
+			this.#activateProject(next.id);
+		} else {
+			this.revision++;
+		}
+	}
+
+	newProject(width: number, height: number): void {
 		const w = clamp(Math.round(width) || 32, MIN_SIZE, MAX_SIZE);
 		const h = clamp(Math.round(height) || 32, MIN_SIZE, MAX_SIZE);
-		this.doc = createDoc(w, h);
-		this.activeLayerId = this.doc.layers[0].id;
-		this.activeFrame = 0;
-		this.zoom = null;
-		this.playing = false;
-		this.cursor = null;
-		this.clearHistory();
-		this.dirty = false;
-		this.name = "Untitled";
-		this.revision++;
+		const doc = createDoc(w, h);
+		const name = this.#nextUntitledName();
+
+		this.#syncActiveProject();
+		const id = uid("project");
+		this.#states.set(id, {
+			doc,
+			activeLayerId: doc.layers[0].id,
+			activeFrame: 0,
+			zoom: null,
+			undo: [],
+			redo: [],
+		});
+		this.projects.push({ id, name, dirty: false, modified: false });
+		this.#activateProject(id);
 	}
 
-	loadProject(project: {
-		doc: PixelDoc;
-		palette?: string[];
-		activeFrame?: number;
-		activeLayerId?: string;
-		name?: string;
-	}): void {
-		this.doc = project.doc;
+	openProject(project: LoadedProject): void {
+		const doc = project.doc;
+		const activeLayerId = doc.layers.some((layer) => layer.id === project.activeLayerId)
+			? project.activeLayerId
+			: doc.layers[doc.layers.length - 1]!.id;
+		const activeFrame = clamp(project.activeFrame ?? 0, 0, doc.frames.length - 1);
+		const name = project.name?.trim() || this.#nextUntitledName();
+
+		this.#syncActiveProject();
+		const id = uid("project");
+		this.#states.set(id, {
+			doc,
+			activeLayerId,
+			activeFrame,
+			zoom: null,
+			undo: [],
+			redo: [],
+		});
+		this.projects.push({ id, name, dirty: false, modified: true });
 		if (project.palette?.length) this.palette = [...project.palette];
-		this.activeFrame = clamp(
-			project.activeFrame ?? 0,
-			0,
-			this.doc.frames.length - 1,
-		);
-		this.activeLayerId = this.doc.layers.some(
-			(layer) => layer.id === project.activeLayerId,
-		)
-			? project.activeLayerId!
-			: this.doc.layers[this.doc.layers.length - 1]!.id;
-		this.name = project.name?.trim() || "Untitled";
-		this.zoom = null;
-		this.playing = false;
-		this.cursor = null;
-		this.clearHistory();
-		this.dirty = false;
-		this.revision++;
+		this.#activateProject(id);
 	}
 
 	markSaved(): void {
 		this.dirty = false;
+		this.modified = true;
+		this.#syncActiveProject();
 	}
 
 	saveToFile(): void {
@@ -248,6 +383,8 @@ export class EditorState {
 		const layer = this.doc.layers.find((item) => item.id === id);
 		if (!layer) return;
 		layer.visible = !layer.visible;
+		this.dirty = true;
+		this.modified = true;
 		this.revision++;
 	}
 
@@ -256,6 +393,7 @@ export class EditorState {
 		if (!layer) return;
 		layer.locked = !layer.locked;
 		this.dirty = true;
+		this.modified = true;
 	}
 
 	renameLayer(id: string, name: string): void {
@@ -264,12 +402,15 @@ export class EditorState {
 		if (!layer || !trimmed) return;
 		layer.name = trimmed;
 		this.dirty = true;
+		this.modified = true;
 	}
 
 	setLayerOpacity(id: string, opacity: number): void {
 		const layer = this.doc.layers.find((item) => item.id === id);
 		if (!layer) return;
 		layer.opacity = clamp(opacity, 0, 1);
+		this.dirty = true;
+		this.modified = true;
 		this.revision++;
 	}
 
@@ -384,7 +525,8 @@ export class EditorState {
 		const index = this.activeFrame;
 		this.doc.frames.splice(index + 1, 0, { id: uid("frame") });
 		for (const layer of this.doc.layers) {
-			const source = layer.cels[index] ?? new Uint32Array(this.doc.width * this.doc.height);
+			const source =
+				layer.cels[index] ?? new Uint32Array(this.doc.width * this.doc.height);
 			layer.cels.splice(index + 1, 0, new Uint32Array(source));
 		}
 		this.activeFrame = index + 1;
@@ -406,6 +548,8 @@ export class EditorState {
 	setFps(value: number): void {
 		if (!Number.isFinite(value)) return;
 		this.doc.fps = clamp(Math.round(value), 1, 60);
+		this.dirty = true;
+		this.modified = true;
 	}
 
 	togglePlayback(): void {

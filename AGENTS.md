@@ -50,6 +50,7 @@ Key files:
 | `lib/components/editor/TimelineLayerRow.svelte` | Sticky layer header and cel cells for one layer row |
 | `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
 | `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
+| `lib/components/editor/ProjectTabs.svelte` | Project tab strip, new-project button, unsaved-close dialog |
 
 ## State and reactivity
 
@@ -59,6 +60,19 @@ Key files:
 - Any mutation that should be undoable must call `editor.pushHistory()` **before** the change. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
 - `editor.revision` is the render invalidation signal. `CanvasStage` and `CelThumb` read it inside `$effect`.
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
+
+## Projects and tabs
+
+- The workspace holds multiple projects. `editor.projects` is a `$state<ProjectTab[]>` of tab metadata (`id`, `name`, `dirty`, `modified`); `editor.activeProjectId` selects one.
+- The active project's live state lives in the top-level `editor` fields: `doc`, `activeLayerId`, `activeFrame`, `zoom`, `name`, `dirty`, `modified`, the undo/redo arrays, and counts.
+- Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame, zoom, undo/redo).
+- Before switching, creating, opening, or saving, `#syncActiveProject()` copies live state into the active tab/snapshot. `#activateProject(id)` loads a target snapshot and tab metadata into the live fields.
+- UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
+- `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
+- `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
+- Undo/redo, zoom, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, and timeline height are workspace-wide.
+- `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
+- **File → New sprite** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
 ## Pixel format
 
@@ -130,6 +144,7 @@ Menu bar
 ├── Tool strip (left, thin, square buttons + tooltips)
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
+    ├── Project tab strip (project tabs, dirty dots, close buttons, new-project)
     ├── Canvas (fit/zoom, grid, cursor, floating zoom pill)
     ├── Resizable divider (drag, or focus and use ↑/↓)
     └── Timeline (Aseprite-style table: layer rows × frame columns, sticky headers, cel thumbnails, opacity footer)
@@ -142,12 +157,17 @@ Preserve these regions and their relative placement when making changes.
 - Project format identifier: `"pixel-spell"`, version `1`.
 - `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user.
 - Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
+- Opening a project file creates a new tab; saving applies to the active project only.
 - PNG export uses `canvas.toDataURL`; sprite sheets place frames horizontally.
 - `editor.saveToFile()` triggers a browser download and clears the dirty flag.
 
 ## Gotchas
 
 - Vite HMR re-evaluates the state module and resets the in-memory document. This is expected during development; do not treat it as a bug.
+- Project tabs are in-memory. A page reload starts with one new `Untitled` project; only explicit project saves persist work.
+- Always sync the active project before switching, creating, opening, or saving. The live top-level fields are not automatically mirrored into the inactive snapshot map.
+- The tab bar must use `projectName`/`isProjectDirty`/`isProjectModified`; the active tab's values are live, inactive tabs use stored metadata.
+- Closing the only never-modified project is a no-op; closing the last remaining project creates a new `Untitled` project.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
 - `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
@@ -161,6 +181,8 @@ Preserve these regions and their relative placement when making changes.
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
 - Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
+- Project tabs switch correctly with independent documents, undo history, zoom, and dirty state; closing a dirty project confirms first.
+- Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.
 - New UI matches the existing modern shadcn aesthetic and respects the layout contract.
 - Update `README.md` when user-facing behavior or shortcuts change.

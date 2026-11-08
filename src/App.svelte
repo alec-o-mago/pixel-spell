@@ -6,6 +6,7 @@
 	import LeftPanel from "$lib/components/editor/LeftPanel.svelte";
 	import MenuBar from "$lib/components/editor/MenuBar.svelte";
 	import NewDocumentDialog from "$lib/components/editor/NewDocumentDialog.svelte";
+	import ProjectTabs from "$lib/components/editor/ProjectTabs.svelte";
 	import ShortcutsDialog from "$lib/components/editor/ShortcutsDialog.svelte";
 	import ToolStrip from "$lib/components/editor/ToolStrip.svelte";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -112,6 +113,7 @@
 			<LeftPanel />
 
 			<main class="flex min-w-0 flex-1 flex-col">
+				<ProjectTabs onNew={() => (newDialogOpen = true)} />
 				<CanvasStage />
 				<TimelineDock />
 			</main>
