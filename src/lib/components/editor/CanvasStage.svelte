@@ -27,7 +27,7 @@
 	} from "$lib/editor/selection.js";
 	import { drawScaled } from "$lib/editor/render.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
-	import { isSelectionTool } from "$lib/editor/tools.js";
+	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
 	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 
@@ -40,6 +40,8 @@
 	let backup: Uint32Array | null = null;
 	/** Packed color captured on pointer down, so the whole stroke stays consistent. */
 	let strokeColor = 0;
+	let strokePath: Point[] = [];
+	let strokePixelPerfect = false;
 
 	let panning = $state(false);
 	let panOrigin = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 };
@@ -197,8 +199,8 @@
 	}
 
 	function mirrorCursor(kind: MirrorKind): string {
-		if (kind === "x") return "cursor-ew-resize";
-		if (kind === "y") return "cursor-ns-resize";
+		if (kind === "x") return "cursor-ns-resize";
+		if (kind === "y") return "cursor-ew-resize";
 		if (kind === "diagonal-down") return "cursor-nesw-resize";
 		return "cursor-nwse-resize";
 	}
@@ -224,9 +226,9 @@
 		for (const axis of editor.mirrorAxes) {
 			let distance: number;
 			if (axis.kind === "x") {
-				distance = Math.abs(boundaryX - axis.position) * zoomX;
-			} else if (axis.kind === "y") {
 				distance = Math.abs(boundaryY - axis.position) * zoomY;
+			} else if (axis.kind === "y") {
+				distance = Math.abs(boundaryX - axis.position) * zoomX;
 			} else if (axis.kind === "diagonal-down") {
 				distance =
 					(Math.abs(boundaryY - boundaryX - axis.position) / Math.SQRT2) * zoomX;
@@ -254,9 +256,9 @@
 		const snap = (value: number) => Math.round(value * 2) / 2;
 
 		if (draggingMirror === "x") {
-			editor.setMirrorPosition("x", snap(boundaryX));
+			editor.setMirrorPosition("x", snap(boundaryY));
 		} else if (draggingMirror === "y") {
-			editor.setMirrorPosition("y", snap(boundaryY));
+			editor.setMirrorPosition("y", snap(boundaryX));
 		} else if (draggingMirror === "diagonal-down") {
 			editor.setMirrorPosition("diagonal-down", snap(boundaryY - boundaryX));
 		} else {
@@ -276,6 +278,7 @@
 			color,
 			editor.mirrorAxes,
 			editor.selection,
+			editor.lockAlpha,
 		);
 	}
 
@@ -295,6 +298,7 @@
 				color,
 				editor.mirrorAxes,
 				editor.selection,
+				editor.lockAlpha,
 			);
 		const dot = (x: number, y: number) =>
 			paintPixel(
@@ -306,6 +310,7 @@
 				color,
 				editor.mirrorAxes,
 				editor.selection,
+				editor.lockAlpha,
 			);
 
 		if (editor.tool === "line") {
@@ -329,6 +334,84 @@
 				editor.shapeFilled ? dot : stroke,
 			);
 		}
+	}
+
+	function appendPixelPerfectPoint(x: number, y: number): boolean {
+		const lastPoint = strokePath[strokePath.length - 1];
+		if (lastPoint && lastPoint.x === x && lastPoint.y === y) return false;
+
+		strokePath.push({ x, y });
+		let removed = false;
+
+		while (strokePath.length >= 3) {
+			const length = strokePath.length;
+			const a = strokePath[length - 3]!;
+			const b = strokePath[length - 2]!;
+			const c = strokePath[length - 1]!;
+
+			const diagonal = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1;
+			const bTouchesA =
+				Math.abs(a.x - b.x) <= 1 &&
+				Math.abs(a.y - b.y) <= 1 &&
+				(a.x === b.x || a.y === b.y);
+			const bTouchesC =
+				Math.abs(b.x - c.x) <= 1 &&
+				Math.abs(b.y - c.y) <= 1 &&
+				(b.x === c.x || b.y === c.y);
+
+			if (diagonal && bTouchesA && bTouchesC) {
+				strokePath.splice(length - 2, 1);
+				removed = true;
+				continue;
+			}
+			break;
+		}
+
+		return removed;
+	}
+
+	function repaintPixelPerfectStroke(cel: Uint32Array): void {
+		if (!backup) return;
+		cel.set(backup);
+
+		const color = editor.tool === "eraser" ? 0 : strokeColor;
+		for (const point of strokePath) {
+			paintBrush(
+				cel,
+				editor.doc.width,
+				editor.doc.height,
+				point.x,
+				point.y,
+				editor.brushSize,
+				color,
+				editor.mirrorAxes,
+				editor.selection,
+				editor.lockAlpha,
+			);
+		}
+	}
+
+	function updatePixelPerfectStroke(cel: Uint32Array, point: Point): void {
+		const from = last ?? point;
+		const newPoints: Point[] = [];
+
+		plotLine(from.x, from.y, point.x, point.y, (x, y) => {
+			if (x === from.x && y === from.y) return;
+			newPoints.push({ x, y });
+		});
+
+		let removed = false;
+		for (const next of newPoints) {
+			if (appendPixelPerfectPoint(next.x, next.y)) removed = true;
+		}
+
+		if (removed) {
+			repaintPixelPerfectStroke(cel);
+		} else {
+			for (const next of newPoints) paintAt(cel, next.x, next.y);
+		}
+
+		last = point;
 	}
 
 	function pickColor(point: Point, slot: "primary" | "secondary"): void {
@@ -632,15 +715,15 @@
 				let y1 = 0;
 
 				if (axis.kind === "x") {
-					x0 = axis.position;
-					x1 = axis.position;
-					y0 = 0;
-					y1 = docHeight;
-				} else if (axis.kind === "y") {
 					y0 = axis.position;
 					y1 = axis.position;
 					x0 = 0;
 					x1 = docWidth;
+				} else if (axis.kind === "y") {
+					x0 = axis.position;
+					x1 = axis.position;
+					y0 = 0;
+					y1 = docHeight;
 				} else if (axis.kind === "diagonal-down") {
 					const startX = Math.max(0, -axis.position);
 					const endX = Math.min(docWidth, docHeight - axis.position);
@@ -664,7 +747,7 @@
 			}
 			context.lineWidth = Math.max(1.5, dpr * 1.5);
 			context.setLineDash([6 * dpr, 4 * dpr]);
-			context.strokeStyle = "rgba(59, 130, 246, 0.95)";
+			context.strokeStyle = "rgba(14, 165, 233, 0.95)";
 			context.stroke();
 			context.setLineDash([]);
 		}
@@ -796,6 +879,7 @@
 				tolerance,
 				editor.fillContiguous,
 				editor.selection,
+				editor.lockAlpha,
 			);
 			if (changed) editor.touch();
 			return;
@@ -806,6 +890,8 @@
 		drawing = true;
 		start = point;
 		last = point;
+		strokePixelPerfect = editor.pixelPerfect && usesPixelPerfect(tool);
+		strokePath = strokePixelPerfect ? [point] : [];
 
 		if (tool === "pencil" || tool === "eraser") {
 			paintAt(cel, point.x, point.y);
@@ -873,9 +959,13 @@
 		if (!cel) return;
 
 		if (editor.tool === "pencil" || editor.tool === "eraser") {
-			const from = last ?? point;
-			plotLine(from.x, from.y, point.x, point.y, (x, y) => paintAt(cel, x, y));
-			last = point;
+			if (strokePixelPerfect) {
+				updatePixelPerfectStroke(cel, point);
+			} else {
+				const from = last ?? point;
+				plotLine(from.x, from.y, point.x, point.y, (x, y) => paintAt(cel, x, y));
+				last = point;
+			}
 		} else {
 			drawShape(cel, point);
 		}
@@ -921,6 +1011,8 @@
 			backup = null;
 			start = null;
 			last = null;
+			strokePath = [];
+			strokePixelPerfect = false;
 			editor.touch();
 		}
 		releasePointer(event);
@@ -948,7 +1040,7 @@
 				style:width={`${canvasWidth}px`}
 				style:height={`${canvasHeight}px`}
 			>
-				<div class="checkerboard absolute inset-0"></div>
+				<div class="checkerboard checkerboard-lg absolute inset-0"></div>
 
 				<canvas
 					bind:this={canvas}

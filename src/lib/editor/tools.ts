@@ -123,3 +123,10 @@ const SELECTION_TOOL_IDS = new Set<ToolId>([
 export function isSelectionTool(tool: ToolId): boolean {
 	return SELECTION_TOOL_IDS.has(tool);
 }
+
+const PIXEL_PERFECT_TOOLS = new Set<ToolId>(["pencil", "eraser"]);
+
+/** Tools whose freehand strokes support pixel-perfect corner removal. */
+export function usesPixelPerfect(tool: ToolId): boolean {
+	return PIXEL_PERFECT_TOOLS.has(tool);
+}

@@ -9,10 +9,12 @@
 	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
+	import Lock from "@lucide/svelte/icons/lock";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
 	import Moon from "@lucide/svelte/icons/moon";
 	import Redo2 from "@lucide/svelte/icons/redo-2";
 	import Save from "@lucide/svelte/icons/save";
+	import Spline from "@lucide/svelte/icons/spline";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
 	import Undo2 from "@lucide/svelte/icons/undo-2";
@@ -41,6 +43,10 @@
 	} = $props();
 
 	let fileInput: HTMLInputElement | undefined;
+
+	function activeRing(active: boolean): string {
+		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
+	}
 
 	function openProject(): void {
 		fileInput?.click();
@@ -201,14 +207,68 @@
 				{#snippet child({ props })}
 					<Button
 						{...props}
-						variant={editor.mirrorX ? "secondary" : "ghost"}
+						variant="ghost"
 						size="icon-sm"
-						class="text-muted-foreground"
+						class={`text-muted-foreground ${activeRing(editor.pixelPerfect)}`}
+						onclick={() => (editor.pixelPerfect = !editor.pixelPerfect)}
+						aria-label="Toggle pixel perfect"
+						aria-pressed={editor.pixelPerfect}
+					>
+						<Spline class="size-4" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				Pixel perfect — remove extra corner pixels
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Separator orientation="vertical" class="mx-1 h-5" />
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant={editor.lockAlpha ? "secondary" : "ghost"}
+						size="icon-sm"
+						class={`relative overflow-hidden text-muted-foreground ${activeRing(editor.lockAlpha)}`}
+						onclick={() => (editor.lockAlpha = !editor.lockAlpha)}
+						aria-label="Toggle alpha lock"
+						aria-pressed={editor.lockAlpha}
+					>
+						<span class="alpha-checker pointer-events-none absolute inset-0" aria-hidden="true"
+						></span>
+						{#if editor.lockAlpha}
+							<span
+								class="pointer-events-none absolute inset-0 bg-primary/20"
+								aria-hidden="true"
+							></span>
+						{/if}
+						<Lock class="relative size-4 text-foreground" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				Lock alpha — transparent pixels cannot be modified
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Separator orientation="vertical" class="mx-1 h-5" />
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="icon-sm"
+						class={`text-muted-foreground ${activeRing(editor.mirrorX)}`}
 						onclick={() => editor.toggleMirror("x")}
 						aria-label="Toggle X axis mirror"
 						aria-pressed={editor.mirrorX}
 					>
-						<FlipHorizontal2 class="size-4" />
+						<FlipVertical2 class="size-4" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
@@ -222,14 +282,14 @@
 				{#snippet child({ props })}
 					<Button
 						{...props}
-						variant={editor.mirrorY ? "secondary" : "ghost"}
+						variant="ghost"
 						size="icon-sm"
-						class="text-muted-foreground"
+						class={`text-muted-foreground ${activeRing(editor.mirrorY)}`}
 						onclick={() => editor.toggleMirror("y")}
 						aria-label="Toggle Y axis mirror"
 						aria-pressed={editor.mirrorY}
 					>
-						<FlipVertical2 class="size-4" />
+						<FlipHorizontal2 class="size-4" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
@@ -243,9 +303,9 @@
 				{#snippet child({ props })}
 					<Button
 						{...props}
-						variant={editor.mirrorDiagonalDown ? "secondary" : "ghost"}
+						variant="ghost"
 						size="icon-sm"
-						class="text-muted-foreground"
+						class={`text-muted-foreground ${activeRing(editor.mirrorDiagonalDown)}`}
 						onclick={() => editor.toggleMirror("diagonal-down")}
 						aria-label="Toggle diagonal \ mirror"
 						aria-pressed={editor.mirrorDiagonalDown}
@@ -264,9 +324,9 @@
 				{#snippet child({ props })}
 					<Button
 						{...props}
-						variant={editor.mirrorDiagonalUp ? "secondary" : "ghost"}
+						variant="ghost"
 						size="icon-sm"
-						class="text-muted-foreground"
+						class={`text-muted-foreground ${activeRing(editor.mirrorDiagonalUp)}`}
 						onclick={() => editor.toggleMirror("diagonal-up")}
 						aria-label="Toggle diagonal / mirror"
 						aria-pressed={editor.mirrorDiagonalUp}

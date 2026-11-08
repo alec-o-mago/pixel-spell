@@ -21,9 +21,9 @@ function forEachMirroredPoint(
 			const axis = mirrors[index]!;
 
 			if (axis.kind === "x") {
-				px = Math.round(2 * axis.position - px - 1);
-			} else if (axis.kind === "y") {
 				py = Math.round(2 * axis.position - py - 1);
+			} else if (axis.kind === "y") {
+				px = Math.round(2 * axis.position - px - 1);
 			} else if (axis.kind === "diagonal-down") {
 				const nextX = Math.round(py - axis.position);
 				const nextY = Math.round(px + axis.position);
@@ -51,11 +51,14 @@ export function paintPixel(
 	color: number,
 	mirrors: readonly MirrorAxis[] = [],
 	clip: Uint8Array | null = null,
+	lockAlpha = false,
 ): void {
 	const set = (px: number, py: number) => {
 		if (px < 0 || px >= width || py < 0 || py >= height) return;
-		if (clip && !clip[py * width + px]) return;
-		cel[py * width + px] = color;
+		const index = py * width + px;
+		if (clip && !clip[index]) return;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) return;
+		cel[index] = color;
 	};
 
 	forEachMirroredPoint(x, y, width, height, mirrors, set);
@@ -72,13 +75,16 @@ export function paintBrush(
 	color: number,
 	mirrors: readonly MirrorAxis[] = [],
 	clip: Uint8Array | null = null,
+	lockAlpha = false,
 ): void {
 	const span = Math.max(1, Math.round(size));
 	const offset = Math.floor((span - 1) / 2);
 	const set = (px: number, py: number) => {
 		if (px < 0 || px >= width || py < 0 || py >= height) return;
-		if (clip && !clip[py * width + px]) return;
-		cel[py * width + px] = color;
+		const index = py * width + px;
+		if (clip && !clip[index]) return;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) return;
+		cel[index] = color;
 	};
 
 	for (let dy = 0; dy < span; dy++) {
@@ -255,11 +261,13 @@ export function fillPixels(
 	tolerance: number,
 	contiguous: boolean,
 	clip: Uint8Array | null = null,
+	lockAlpha = false,
 ): boolean {
 	if (x < 0 || x >= width || y < 0 || y >= height) return false;
 
 	const startIndex = y * width + x;
 	if (clip && !clip[startIndex]) return false;
+	if (lockAlpha && (cel[startIndex]! >>> 24) === 0) return false;
 
 	const target = cel[startIndex];
 	if (target === color) return false;
@@ -269,7 +277,8 @@ export function fillPixels(
 	if (!contiguous) {
 		for (let i = 0; i < cel.length; i++) {
 			if (clip && !clip[i]) continue;
-			if (colorMatches(cel[i], target, tolerance)) {
+			if (lockAlpha && (cel[i]! >>> 24) === 0) continue;
+			if (colorMatches(cel[i]!, target!, tolerance)) {
 				cel[i] = color;
 				changed = true;
 			}
@@ -285,6 +294,7 @@ export function fillPixels(
 		if (visited[index]) continue;
 		visited[index] = 1;
 		if (clip && !clip[index]) continue;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
 
 		if (!colorMatches(cel[index], target, tolerance)) continue;
 
