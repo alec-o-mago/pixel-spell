@@ -144,11 +144,13 @@ export function plotEllipse(
 	const radiusX = Math.max(0.5, (maxX - minX + 1) / 2);
 	const radiusY = Math.max(0.5, (maxY - minY + 1) / 2);
 
+	let previousLeft = minX;
+	let previousRight = maxX;
+	let hasPrevious = false;
+
 	for (let y = minY; y <= maxY; y++) {
 		const normalizedY = (y - centerY) / radiusY;
-		const remaining = 1 - normalizedY * normalizedY;
-		if (remaining < 0) continue;
-
+		const remaining = Math.max(0, 1 - normalizedY * normalizedY);
 		const extent = Math.sqrt(remaining) * radiusX;
 		let left = Math.round(centerX - extent);
 		let right = Math.round(centerX + extent);
@@ -157,13 +159,28 @@ export function plotEllipse(
 
 		if (filled) {
 			for (let x = left; x <= right; x++) write(x, y);
-		} else {
-			write(left, y);
-			write(right, y);
-			if (y === minY || y === maxY) {
-				for (let x = left; x <= right; x++) write(x, y);
-			}
+			continue;
 		}
+
+		if (!hasPrevious) {
+			for (let x = left; x <= right; x++) write(x, y);
+		} else {
+			// Join this row's extents to the previous row's. Wide ellipses can
+			// move several pixels per scanline near the poles, so plotting only
+			// the two edge pixels leaves diagonal gaps.
+			plotLine(previousLeft, y - 1, left, y, write);
+			plotLine(previousRight, y - 1, right, y, write);
+		}
+
+		write(left, y);
+		write(right, y);
+		if (y === maxY) {
+			for (let x = left; x <= right; x++) write(x, y);
+		}
+
+		previousLeft = left;
+		previousRight = right;
+		hasPrevious = true;
 	}
 }
 
