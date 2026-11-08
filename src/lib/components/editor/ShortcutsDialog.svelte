@@ -35,6 +35,7 @@
 				{ label: "Previous frame", keys: "[" },
 				{ label: "Next frame", keys: "]" },
 				{ label: "Toggle grid", keys: "⇧ G" },
+				{ label: "Delete selection", keys: "Delete" },
 			],
 		},
 	];

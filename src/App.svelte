@@ -69,6 +69,12 @@
 
 		if (event.altKey) return;
 
+		if (event.key === "Delete") {
+			event.preventDefault();
+			editor.deleteSelection();
+			return;
+		}
+
 		if (event.shiftKey && key === "g") {
 			event.preventDefault();
 			editor.showGrid = !editor.showGrid;

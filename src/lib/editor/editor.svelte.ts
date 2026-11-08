@@ -631,6 +631,31 @@ export class EditorState {
 		this.revision++;
 	}
 
+	deleteSelection(): void {
+		const mask = this.selection;
+		if (!mask) return;
+
+		const layer = this.activeLayer;
+		if (!layer || layer.locked || !layer.visible) return;
+		const cel = layer.cels[this.activeFrame];
+		if (!cel) return;
+
+		let changed = false;
+		for (let i = 0; i < cel.length; i++) {
+			if (mask[i] && cel[i] !== 0) {
+				changed = true;
+				break;
+			}
+		}
+		if (!changed) return;
+
+		this.pushHistory();
+		for (let i = 0; i < cel.length; i++) {
+			if (mask[i]) cel[i] = 0;
+		}
+		this.touch();
+	}
+
 	clearLayer(): void {
 		const layer = this.activeLayer;
 		if (!layer) return;
