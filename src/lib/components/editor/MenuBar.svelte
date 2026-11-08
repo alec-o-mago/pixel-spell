@@ -9,12 +9,12 @@
 	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
+	import LineSquiggle from "@lucide/svelte/icons/line-squiggle";
 	import Lock from "@lucide/svelte/icons/lock";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
 	import Moon from "@lucide/svelte/icons/moon";
 	import Redo2 from "@lucide/svelte/icons/redo-2";
 	import Save from "@lucide/svelte/icons/save";
-	import Spline from "@lucide/svelte/icons/spline";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
 	import Undo2 from "@lucide/svelte/icons/undo-2";
@@ -201,7 +201,7 @@
 		</DropdownMenu.Root>
 	</nav>
 
-	<div class="ml-auto flex items-center gap-1 pr-1">
+	<div class="ml-auto flex items-center gap-3 pr-1">
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
@@ -214,7 +214,7 @@
 						aria-label="Toggle pixel perfect"
 						aria-pressed={editor.pixelPerfect}
 					>
-						<Spline class="size-4" />
+						<LineSquiggle class="size-4" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
