@@ -7,10 +7,10 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 ## Features
 
 - **Drawing tools** — pencil, eraser, line, rectangle, ellipse, paint bucket, and eyedropper.
-- **Tool options** — brush sizes from 1–8 px, filled shapes, X/Y symmetry, fill tolerance and contiguous fill, and layer-aware color sampling.
+- **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, and layer-aware color sampling. X/Y mirror toggles live in the top bar, next to the theme switch.
 - **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
-- **Color workflow** — hex input, native color picker, alpha slider, and a 32-color palette you can extend.
+- **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, hex input, and a 32-color palette you can extend. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them.
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
 - **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.

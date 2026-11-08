@@ -3,6 +3,7 @@ import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
 import { saveProjectFile, type LoadedProject } from "./file.js";
 import { DEFAULT_PALETTE } from "./palette.js";
 import type {
+	ColorSlot,
 	Layer,
 	PixelDoc,
 	Point,
@@ -45,6 +46,10 @@ export class EditorState {
 	tool = $state<ToolId>("pencil");
 	primaryColor = $state("#18181b");
 	alpha = $state(255);
+	secondaryColor = $state("#ffffff");
+	secondaryAlpha = $state(255);
+	/** Which color slot the color panel is currently editing. */
+	activeColorSlot = $state<ColorSlot>("primary");
 	palette = $state<string[]>([...DEFAULT_PALETTE]);
 
 	brushSize = $state(1);
@@ -121,6 +126,10 @@ export class EditorState {
 		return packColor(this.primaryColor, this.alpha);
 	}
 
+	get secondaryCurrentColor(): number {
+		return packColor(this.secondaryColor, this.secondaryAlpha);
+	}
+
 	get fitZoom(): number {
 		const availableWidth = Math.max(0, this.viewport.w - 64);
 		const availableHeight = Math.max(0, this.viewport.h - 112);
@@ -139,20 +148,47 @@ export class EditorState {
 	}
 
 	setPrimaryColor(hex: string): void {
-		const normalized = normalizeHex(hex);
-		if (normalized) this.primaryColor = normalized;
+		this.setColor("primary", hex);
 	}
 
-	setColorFromPacked(value: number): void {
+	setSecondaryColor(hex: string): void {
+		this.setColor("secondary", hex);
+	}
+
+	setColor(slot: ColorSlot, hex: string): void {
+		const normalized = normalizeHex(hex);
+		if (!normalized) return;
+		if (slot === "secondary") this.secondaryColor = normalized;
+		else this.primaryColor = normalized;
+	}
+
+	setColorAlpha(slot: ColorSlot, alpha: number): void {
+		const value = clamp(Math.round(alpha), 0, 255);
+		if (slot === "secondary") this.secondaryAlpha = value;
+		else this.alpha = value;
+	}
+
+	setColorFromPacked(value: number, slot: ColorSlot = "primary"): void {
 		const { r, g, b, a } = unpackColor(value);
 		if (a === 0) return;
-		this.primaryColor = rgbToHex(r, g, b);
-		this.alpha = a;
+		this.setColor(slot, rgbToHex(r, g, b));
+		this.setColorAlpha(slot, a);
+		this.activeColorSlot = slot;
 	}
 
-	addPaletteColor(): void {
-		if (this.palette.includes(this.primaryColor)) return;
-		const next = [...this.palette, this.primaryColor];
+	swapColors(): void {
+		const primaryColor = this.primaryColor;
+		const primaryAlpha = this.alpha;
+		this.primaryColor = this.secondaryColor;
+		this.alpha = this.secondaryAlpha;
+		this.secondaryColor = primaryColor;
+		this.secondaryAlpha = primaryAlpha;
+	}
+
+	addPaletteColor(slot: ColorSlot = this.activeColorSlot): void {
+		const color = slot === "secondary" ? this.secondaryColor : this.primaryColor;
+		if (this.palette.includes(color)) return;
+		const next = [...this.palette, color];
 		this.palette = next.slice(-64);
 	}
 

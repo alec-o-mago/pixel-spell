@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Eraser from "@lucide/svelte/icons/eraser";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
+	import FlipHorizontal2 from "@lucide/svelte/icons/flip-horizontal-2";
+	import FlipVertical2 from "@lucide/svelte/icons/flip-vertical-2";
 	import FolderOpen from "@lucide/svelte/icons/folder-open";
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
 	import ImageDown from "@lucide/svelte/icons/image-down";
@@ -19,6 +21,7 @@
 	import ZoomOut from "@lucide/svelte/icons/zoom-out";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
+	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import {
 		exportFramePng,
@@ -192,7 +195,51 @@
 		</DropdownMenu.Root>
 	</nav>
 
-	<div class="ml-auto flex items-center gap-2 pr-1">
+	<div class="ml-auto flex items-center gap-1 pr-1">
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant={editor.mirrorX ? "secondary" : "ghost"}
+						size="icon-sm"
+						class="text-muted-foreground"
+						onclick={() => (editor.mirrorX = !editor.mirrorX)}
+						aria-label="Toggle X axis mirror"
+						aria-pressed={editor.mirrorX}
+					>
+						<FlipHorizontal2 class="size-4" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				X axis mirror
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant={editor.mirrorY ? "secondary" : "ghost"}
+						size="icon-sm"
+						class="text-muted-foreground"
+						onclick={() => (editor.mirrorY = !editor.mirrorY)}
+						aria-label="Toggle Y axis mirror"
+						aria-pressed={editor.mirrorY}
+					>
+						<FlipVertical2 class="size-4" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				Y axis mirror
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Separator orientation="vertical" class="mx-1 h-5" />
+
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}

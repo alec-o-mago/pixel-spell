@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Lightbulb from "@lucide/svelte/icons/lightbulb";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -105,44 +104,7 @@
 						<Switch bind:checked={editor.shapeFilled} />
 					</label>
 				{/if}
-
-				<div class="space-y-2.5">
-					<div class="flex items-center justify-between">
-						<span class="text-xs font-medium">Symmetry</span>
-						<span class="text-[10px] text-muted-foreground">Mirror strokes</span>
-					</div>
-					<div class="grid grid-cols-2 gap-2">
-						<label
-							class="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2"
-						>
-							<span class="text-xs">X axis</span>
-							<Switch size="sm" bind:checked={editor.mirrorX} />
-						</label>
-						<label
-							class="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2"
-						>
-							<span class="text-xs">Y axis</span>
-							<Switch size="sm" bind:checked={editor.mirrorY} />
-						</label>
-					</div>
-				</div>
 			{/if}
-		</div>
-
-		<div class="mt-auto pt-6">
-			<div class="rounded-lg border border-dashed bg-muted/30 p-3">
-				<div
-					class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-				>
-					<Lightbulb class="size-3" />
-					Tip
-				</div>
-				<p class="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-					Double-click a layer name to rename it. Press
-					<kbd class="rounded border bg-background px-1 font-mono text-[9px]">Space</kbd>
-					to preview the animation.
-				</p>
-			</div>
 		</div>
 	</div>
 </section>

@@ -7,6 +7,9 @@ export type ToolId =
 	| "fill"
 	| "eyedropper";
 
+/** Which mouse button a color is assigned to. */
+export type ColorSlot = "primary" | "secondary";
+
 export interface Frame {
 	id: string;
 }

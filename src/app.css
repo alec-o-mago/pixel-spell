@@ -209,3 +209,46 @@ canvas {
 .no-scrollbar::-webkit-scrollbar {
 	display: none;
 }
+
+/* Native range inputs used by the inline color picker. */
+.color-range {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 100%;
+	height: 0.75rem;
+	border-radius: 999px;
+	outline: none;
+	cursor: pointer;
+	touch-action: none;
+	box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.color-range:focus-visible {
+	box-shadow:
+		inset 0 0 0 1px var(--border),
+		0 0 0 2px var(--ring);
+}
+
+.color-range::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 0.875rem;
+	height: 0.875rem;
+	border-radius: 999px;
+	border: 2px solid #fff;
+	background: #fff;
+	box-shadow:
+		0 0 0 1px rgb(0 0 0 / 0.35),
+		0 1px 2px rgb(0 0 0 / 0.3);
+}
+
+.color-range::-moz-range-thumb {
+	width: 0.875rem;
+	height: 0.875rem;
+	border-radius: 999px;
+	border: 2px solid #fff;
+	background: #fff;
+	box-shadow:
+		0 0 0 1px rgb(0 0 0 / 0.35),
+		0 1px 2px rgb(0 0 0 / 0.3);
+}

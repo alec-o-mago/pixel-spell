@@ -26,6 +26,8 @@
 	let start: Point | null = null;
 	let last: Point | null = null;
 	let backup: Uint32Array | null = null;
+	/** Packed color captured on pointer down, so the whole stroke stays consistent. */
+	let strokeColor = 0;
 
 	let zoom = $derived(editor.effectiveZoom);
 	let canvasWidth = $derived(editor.doc.width * zoom);
@@ -99,7 +101,7 @@
 	}
 
 	function paintAt(cel: Uint32Array, x: number, y: number): void {
-		const color = editor.tool === "eraser" ? 0 : editor.currentColor;
+		const color = editor.tool === "eraser" ? 0 : strokeColor;
 		paintBrush(
 			cel,
 			editor.doc.width,
@@ -117,7 +119,7 @@
 		if (!backup || !start) return;
 		cel.set(backup);
 
-		const color = editor.currentColor;
+		const color = strokeColor;
 		const stroke = (x: number, y: number) =>
 			paintBrush(
 				cel,
@@ -165,17 +167,18 @@
 		}
 	}
 
-	function pickColor(point: Point): void {
+	function pickColor(point: Point, slot: "primary" | "secondary"): void {
 		const frame = editor.activeFrame;
 		const source = editor.sampleAllLayers
 			? compositeFrame(editor.doc, frame)
 			: editor.activeLayer.cels[frame];
 		if (!source) return;
-		editor.setColorFromPacked(source[point.y * editor.doc.width + point.x] ?? 0);
+		editor.setColorFromPacked(source[point.y * editor.doc.width + point.x] ?? 0, slot);
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
-		if (event.button !== 0 || !isDrawable) return;
+		const secondary = event.button === 2;
+		if ((event.button !== 0 && !secondary) || !isDrawable) return;
 		const point = pixelFromEvent(event);
 		if (!point) return;
 
@@ -189,9 +192,11 @@
 		}
 
 		if (editor.tool === "eyedropper") {
-			pickColor(point);
+			pickColor(point, secondary ? "secondary" : "primary");
 			return;
 		}
+
+		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 
 		const layer = editor.activeLayer;
 		const cel = layer.cels[editor.activeFrame];
@@ -206,7 +211,7 @@
 				editor.doc.height,
 				point.x,
 				point.y,
-				editor.currentColor,
+				strokeColor,
 				tolerance,
 				editor.fillContiguous,
 			);
