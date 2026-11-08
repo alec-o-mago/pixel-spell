@@ -123,6 +123,21 @@ export function colorSelectionMask(
 	return mask;
 }
 
+export function unionSelectionMasks(
+	base: Uint8Array | null,
+	addition: Uint8Array | null,
+): Uint8Array | null {
+	if (!base) return addition;
+	if (!addition) return base;
+
+	const length = Math.min(base.length, addition.length);
+	const result = new Uint8Array(length);
+	for (let i = 0; i < length; i++) {
+		result[i] = base[i] || addition[i] ? 1 : 0;
+	}
+	return result;
+}
+
 export function translateSelectionMask(
 	mask: Uint8Array,
 	width: number,

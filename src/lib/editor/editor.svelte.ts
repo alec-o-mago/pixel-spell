@@ -5,6 +5,8 @@ import { DEFAULT_PALETTE } from "./palette.js";
 import type {
 	ColorSlot,
 	Layer,
+	MirrorAxis,
+	MirrorKind,
 	PixelDoc,
 	Point,
 	ProjectTab,
@@ -56,6 +58,12 @@ export class EditorState {
 	brushSize = $state(1);
 	mirrorX = $state(false);
 	mirrorY = $state(false);
+	mirrorDiagonalDown = $state(false);
+	mirrorDiagonalUp = $state(false);
+	mirrorXOffset = $state(0);
+	mirrorYOffset = $state(0);
+	mirrorDiagonalDownOffset = $state(0);
+	mirrorDiagonalUpOffset = $state(0);
 	shapeFilled = $state(false);
 	fillTolerance = $state(0);
 	fillContiguous = $state(true);
@@ -133,6 +141,47 @@ export class EditorState {
 		return this.selection !== null;
 	}
 
+	get mirrorAxes(): MirrorAxis[] {
+		const width = this.doc.width;
+		const height = this.doc.height;
+		const axes: MirrorAxis[] = [];
+
+		if (this.mirrorX) {
+			axes.push({
+				kind: "x",
+				position: clamp(width / 2 + this.mirrorXOffset, 0, width),
+			});
+		}
+		if (this.mirrorY) {
+			axes.push({
+				kind: "y",
+				position: clamp(height / 2 + this.mirrorYOffset, 0, height),
+			});
+		}
+		if (this.mirrorDiagonalDown) {
+			axes.push({
+				kind: "diagonal-down",
+				position: clamp(
+					(height - width) / 2 + this.mirrorDiagonalDownOffset,
+					-width,
+					height,
+				),
+			});
+		}
+		if (this.mirrorDiagonalUp) {
+			axes.push({
+				kind: "diagonal-up",
+				position: clamp(
+					(width + height) / 2 + this.mirrorDiagonalUpOffset,
+					0,
+					width + height,
+				),
+			});
+		}
+
+		return axes;
+	}
+
 	get currentColor(): number {
 		return packColor(this.primaryColor, this.alpha);
 	}
@@ -167,6 +216,42 @@ export class EditorState {
 		if (!this.selection) return;
 		this.selection = null;
 		this.selectionRevision++;
+	}
+
+	toggleMirror(kind: MirrorKind): void {
+		if (kind === "x") {
+			this.mirrorX = !this.mirrorX;
+			if (!this.mirrorX) this.mirrorXOffset = 0;
+		} else if (kind === "y") {
+			this.mirrorY = !this.mirrorY;
+			if (!this.mirrorY) this.mirrorYOffset = 0;
+		} else if (kind === "diagonal-down") {
+			this.mirrorDiagonalDown = !this.mirrorDiagonalDown;
+			if (!this.mirrorDiagonalDown) this.mirrorDiagonalDownOffset = 0;
+		} else {
+			this.mirrorDiagonalUp = !this.mirrorDiagonalUp;
+			if (!this.mirrorDiagonalUp) this.mirrorDiagonalUpOffset = 0;
+		}
+		this.revision++;
+	}
+
+	setMirrorPosition(kind: MirrorKind, position: number): void {
+		const width = this.doc.width;
+		const height = this.doc.height;
+
+		if (kind === "x") {
+			this.mirrorXOffset = clamp(position, 0, width) - width / 2;
+		} else if (kind === "y") {
+			this.mirrorYOffset = clamp(position, 0, height) - height / 2;
+		} else if (kind === "diagonal-down") {
+			this.mirrorDiagonalDownOffset =
+				clamp(position, -width, height) - (height - width) / 2;
+		} else {
+			this.mirrorDiagonalUpOffset =
+				clamp(position, 0, width + height) - (width + height) / 2;
+		}
+
+		this.revision++;
 	}
 
 	setPrimaryColor(hex: string): void {

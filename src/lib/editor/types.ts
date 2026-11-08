@@ -17,6 +17,14 @@ export type ToolId =
 /** Which mouse button a color is assigned to. */
 export type ColorSlot = "primary" | "secondary";
 
+export type MirrorKind = "x" | "y" | "diagonal-down" | "diagonal-up";
+
+export interface MirrorAxis {
+	kind: MirrorKind;
+	/** Axis position in canvas boundary coordinates. */
+	position: number;
+}
+
 export interface Frame {
 	id: string;
 }

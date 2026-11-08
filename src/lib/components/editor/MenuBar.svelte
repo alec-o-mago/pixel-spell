@@ -204,7 +204,7 @@
 						variant={editor.mirrorX ? "secondary" : "ghost"}
 						size="icon-sm"
 						class="text-muted-foreground"
-						onclick={() => (editor.mirrorX = !editor.mirrorX)}
+						onclick={() => editor.toggleMirror("x")}
 						aria-label="Toggle X axis mirror"
 						aria-pressed={editor.mirrorX}
 					>
@@ -225,7 +225,7 @@
 						variant={editor.mirrorY ? "secondary" : "ghost"}
 						size="icon-sm"
 						class="text-muted-foreground"
-						onclick={() => (editor.mirrorY = !editor.mirrorY)}
+						onclick={() => editor.toggleMirror("y")}
 						aria-label="Toggle Y axis mirror"
 						aria-pressed={editor.mirrorY}
 					>
@@ -235,6 +235,48 @@
 			</Tooltip.Trigger>
 			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
 				Y axis mirror
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant={editor.mirrorDiagonalDown ? "secondary" : "ghost"}
+						size="icon-sm"
+						class="text-muted-foreground"
+						onclick={() => editor.toggleMirror("diagonal-down")}
+						aria-label="Toggle diagonal \ mirror"
+						aria-pressed={editor.mirrorDiagonalDown}
+					>
+						<FlipHorizontal2 class="size-4 rotate-45" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				Diagonal \ mirror
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant={editor.mirrorDiagonalUp ? "secondary" : "ghost"}
+						size="icon-sm"
+						class="text-muted-foreground"
+						onclick={() => editor.toggleMirror("diagonal-up")}
+						aria-label="Toggle diagonal / mirror"
+						aria-pressed={editor.mirrorDiagonalUp}
+					>
+						<FlipHorizontal2 class="size-4 -rotate-45" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				Diagonal / mirror
 			</Tooltip.Content>
 		</Tooltip.Root>
 

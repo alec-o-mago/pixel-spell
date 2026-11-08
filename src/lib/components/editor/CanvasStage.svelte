@@ -23,11 +23,12 @@
 		magicWandMask,
 		rectSelectionMask,
 		translateSelectionMask,
+		unionSelectionMasks,
 	} from "$lib/editor/selection.js";
 	import { drawScaled } from "$lib/editor/render.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import { isSelectionTool } from "$lib/editor/tools.js";
-	import type { Point } from "$lib/editor/types.js";
+	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 
 	let stage: HTMLDivElement | undefined;
@@ -46,10 +47,14 @@
 	let selecting = false;
 	let selectStart: Point | null = null;
 	let selectElliptical = false;
+	let selectAdditive = false;
+	let selectBaseMask: Uint8Array | null = null;
 
 	let lassoPoints = $state<Point[]>([]);
 	let lassoHover = $state<Point | null>(null);
 	let lassoDragging = false;
+	let lassoAdditive = false;
+	let lassoBaseMask: Uint8Array | null = null;
 
 	let movingSelection = false;
 	let moveStart: Point | null = null;
@@ -59,6 +64,8 @@
 	let moveApplied = false;
 
 	let hoveringSelection = $state(false);
+	let hoveringMirror = $state<MirrorKind | null>(null);
+	let draggingMirror = $state<MirrorKind | null>(null);
 
 	let zoom = $derived(editor.effectiveZoom);
 	let canvasWidth = $derived(editor.doc.width * zoom);
@@ -78,27 +85,35 @@
 	let cursorOffset = $derived(Math.floor((brushCursorSize - 1) / 2));
 
 	let showBrushCursor = $derived(
-		editor.tool !== "pan" && editor.tool !== "zoom" && !isSelectionTool(editor.tool),
+		!draggingMirror &&
+			!hoveringMirror &&
+			editor.tool !== "pan" &&
+			editor.tool !== "zoom" &&
+			!isSelectionTool(editor.tool),
 	);
 
 	let canvasCursor = $derived(
-		editor.tool === "pan"
-			? panning
-				? "cursor-grabbing"
-				: "cursor-grab"
-			: editor.tool === "zoom"
-				? "cursor-zoom-in"
-				: isSelectionTool(editor.tool)
-					? hoveringSelection
-						? "cursor-move"
-						: "cursor-crosshair"
-					: !isDrawable
-						? "cursor-not-allowed"
-						: editor.tool === "eyedropper"
-							? "cursor-copy"
-							: editor.tool === "fill"
-								? "cursor-cell"
-								: "cursor-crosshair",
+		draggingMirror
+			? mirrorCursor(draggingMirror)
+			: hoveringMirror
+				? mirrorCursor(hoveringMirror)
+				: editor.tool === "pan"
+					? panning
+						? "cursor-grabbing"
+						: "cursor-grab"
+					: editor.tool === "zoom"
+						? "cursor-zoom-in"
+						: isSelectionTool(editor.tool)
+							? hoveringSelection
+								? "cursor-move"
+								: "cursor-crosshair"
+							: !isDrawable
+								? "cursor-not-allowed"
+								: editor.tool === "eyedropper"
+									? "cursor-copy"
+									: editor.tool === "fill"
+										? "cursor-cell"
+										: "cursor-crosshair",
 	);
 
 	$effect(() => {
@@ -121,6 +136,7 @@
 		const selection = editor.selection;
 		const lasso = lassoPoints;
 		const hover = lassoHover;
+		const mirrors = editor.mirrorAxes;
 
 		if (!canvas) return;
 		const pixels = compositeFrame(doc, frame);
@@ -133,7 +149,9 @@
 			doc.height * currentZoom,
 		);
 		const context = canvas.getContext("2d");
-		if (context) drawOverlay(context, selection, lasso, hover, doc.width, doc.height);
+		if (context) {
+			drawOverlay(context, selection, lasso, hover, mirrors, doc.width, doc.height);
+		}
 	});
 
 	$effect(() => {
@@ -178,6 +196,74 @@
 		);
 	}
 
+	function mirrorCursor(kind: MirrorKind): string {
+		if (kind === "x") return "cursor-ew-resize";
+		if (kind === "y") return "cursor-ns-resize";
+		if (kind === "diagonal-down") return "cursor-nesw-resize";
+		return "cursor-nwse-resize";
+	}
+
+	function mirrorAtEvent(event: PointerEvent): MirrorAxis | null {
+		if (!canvas) return null;
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0) return null;
+
+		const width = editor.doc.width;
+		const height = editor.doc.height;
+		const boundaryX = ((event.clientX - rect.left) / rect.width) * width;
+		const boundaryY = ((event.clientY - rect.top) / rect.height) * height;
+		if (boundaryX < 0 || boundaryX > width || boundaryY < 0 || boundaryY > height) {
+			return null;
+		}
+
+		const zoomX = rect.width / width;
+		const zoomY = rect.height / height;
+		let best: MirrorAxis | null = null;
+		let bestDistance = 6;
+
+		for (const axis of editor.mirrorAxes) {
+			let distance: number;
+			if (axis.kind === "x") {
+				distance = Math.abs(boundaryX - axis.position) * zoomX;
+			} else if (axis.kind === "y") {
+				distance = Math.abs(boundaryY - axis.position) * zoomY;
+			} else if (axis.kind === "diagonal-down") {
+				distance =
+					(Math.abs(boundaryY - boundaryX - axis.position) / Math.SQRT2) * zoomX;
+			} else {
+				distance =
+					(Math.abs(boundaryX + boundaryY - axis.position) / Math.SQRT2) * zoomX;
+			}
+
+			if (distance < bestDistance) {
+				best = axis;
+				bestDistance = distance;
+			}
+		}
+
+		return best;
+	}
+
+	function updateMirrorDrag(event: PointerEvent): void {
+		if (!draggingMirror || !canvas) return;
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width === 0 || rect.height === 0) return;
+
+		const boundaryX = ((event.clientX - rect.left) / rect.width) * editor.doc.width;
+		const boundaryY = ((event.clientY - rect.top) / rect.height) * editor.doc.height;
+		const snap = (value: number) => Math.round(value * 2) / 2;
+
+		if (draggingMirror === "x") {
+			editor.setMirrorPosition("x", snap(boundaryX));
+		} else if (draggingMirror === "y") {
+			editor.setMirrorPosition("y", snap(boundaryY));
+		} else if (draggingMirror === "diagonal-down") {
+			editor.setMirrorPosition("diagonal-down", snap(boundaryY - boundaryX));
+		} else {
+			editor.setMirrorPosition("diagonal-up", snap(boundaryX + boundaryY));
+		}
+	}
+
 	function paintAt(cel: Uint32Array, x: number, y: number): void {
 		const color = editor.tool === "eraser" ? 0 : strokeColor;
 		paintBrush(
@@ -188,8 +274,7 @@
 			y,
 			editor.brushSize,
 			color,
-			editor.mirrorX,
-			editor.mirrorY,
+			editor.mirrorAxes,
 			editor.selection,
 		);
 	}
@@ -208,8 +293,7 @@
 				y,
 				editor.brushSize,
 				color,
-				editor.mirrorX,
-				editor.mirrorY,
+				editor.mirrorAxes,
 				editor.selection,
 			);
 		const dot = (x: number, y: number) =>
@@ -220,8 +304,7 @@
 				x,
 				y,
 				color,
-				editor.mirrorX,
-				editor.mirrorY,
+				editor.mirrorAxes,
 				editor.selection,
 			);
 
@@ -308,29 +391,31 @@
 					height,
 				)
 			: rectSelectionMask(selectStart.x, selectStart.y, point.x, point.y, width, height);
-		editor.setSelection(mask);
-	}
-
-	function selectMagicWand(point: Point): void {
-		const cel = editor.activeLayer.cels[editor.activeFrame];
-		if (!cel) return;
 		editor.setSelection(
-			magicWandMask(
-				cel,
-				editor.doc.width,
-				editor.doc.height,
-				point.x,
-				point.y,
-				editor.magicWandDiagonal,
-			),
+			selectAdditive ? unionSelectionMasks(selectBaseMask, mask) : mask,
 		);
 	}
 
-	function selectByColor(point: Point): void {
+	function selectMagicWand(point: Point, additive: boolean): void {
+		const cel = editor.activeLayer.cels[editor.activeFrame];
+		if (!cel) return;
+		const mask = magicWandMask(
+			cel,
+			editor.doc.width,
+			editor.doc.height,
+			point.x,
+			point.y,
+			editor.magicWandDiagonal,
+		);
+		editor.setSelection(additive ? unionSelectionMasks(editor.selection, mask) : mask);
+	}
+
+	function selectByColor(point: Point, additive: boolean): void {
 		const cel = editor.activeLayer.cels[editor.activeFrame];
 		if (!cel) return;
 		const color = cel[point.y * editor.doc.width + point.x] ?? 0;
-		editor.setSelection(colorSelectionMask(cel, color));
+		const mask = colorSelectionMask(cel, color);
+		editor.setSelection(additive ? unionSelectionMasks(editor.selection, mask) : mask);
 	}
 
 	function appendLassoPoint(point: Point): void {
@@ -360,7 +445,11 @@
 		}
 
 		const mask = lassoSelectionMask(points, editor.doc.width, editor.doc.height);
-		if (mask) editor.setSelection(mask);
+		if (mask) {
+			editor.setSelection(
+				lassoAdditive ? unionSelectionMasks(lassoBaseMask, mask) : mask,
+			);
+		}
 		resetLasso();
 	}
 
@@ -368,6 +457,8 @@
 		lassoPoints = [];
 		lassoHover = null;
 		lassoDragging = false;
+		lassoAdditive = false;
+		lassoBaseMask = null;
 	}
 
 	function beginSelectionMove(point: Point): void {
@@ -446,6 +537,7 @@
 		selection: Uint8Array | null,
 		lasso: Point[],
 		hover: Point | null,
+		mirrors: MirrorAxis[],
 		docWidth: number,
 		docHeight: number,
 	): void {
@@ -531,11 +623,69 @@
 			context.stroke();
 		}
 
+		if (mirrors.length > 0) {
+			context.beginPath();
+			for (const axis of mirrors) {
+				let x0 = 0;
+				let y0 = 0;
+				let x1 = 0;
+				let y1 = 0;
+
+				if (axis.kind === "x") {
+					x0 = axis.position;
+					x1 = axis.position;
+					y0 = 0;
+					y1 = docHeight;
+				} else if (axis.kind === "y") {
+					y0 = axis.position;
+					y1 = axis.position;
+					x0 = 0;
+					x1 = docWidth;
+				} else if (axis.kind === "diagonal-down") {
+					const startX = Math.max(0, -axis.position);
+					const endX = Math.min(docWidth, docHeight - axis.position);
+					if (endX < startX) continue;
+					x0 = startX;
+					y0 = startX + axis.position;
+					x1 = endX;
+					y1 = endX + axis.position;
+				} else {
+					const startX = Math.max(0, axis.position - docHeight);
+					const endX = Math.min(docWidth, axis.position);
+					if (endX < startX) continue;
+					x0 = startX;
+					y0 = axis.position - startX;
+					x1 = endX;
+					y1 = axis.position - endX;
+				}
+
+				context.moveTo(x0 * scaleX, y0 * scaleY);
+				context.lineTo(x1 * scaleX, y1 * scaleY);
+			}
+			context.lineWidth = Math.max(1.5, dpr * 1.5);
+			context.setLineDash([6 * dpr, 4 * dpr]);
+			context.strokeStyle = "rgba(59, 130, 246, 0.95)";
+			context.stroke();
+			context.setLineDash([]);
+		}
+
 		context.restore();
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
 		const tool = editor.tool;
+
+		if (event.button === 0) {
+			const mirror = mirrorAtEvent(event);
+			if (mirror) {
+				event.preventDefault();
+				draggingMirror = mirror.kind;
+				capturePointer(event);
+				return;
+			}
+		}
+
+		hoveringMirror = null;
 
 		if (tool === "pan") {
 			if (event.button !== 0) return;
@@ -572,6 +722,8 @@
 		if (isSelectionTool(tool)) {
 			if (secondary) return;
 
+			const additive = event.shiftKey && !!editor.selection;
+
 			// A pending lasso keeps accepting points, even over an older selection.
 			if (tool === "lasso" && lassoPoints.length > 0) {
 				appendLassoPoint(point);
@@ -579,23 +731,25 @@
 				return;
 			}
 
-			if (editor.selection && isPointSelected(point) && isEditable()) {
+			if (!additive && editor.selection && isPointSelected(point) && isEditable()) {
 				beginSelectionMove(point);
 				return;
 			}
 
 			if (tool === "magic-wand") {
-				selectMagicWand(point);
+				selectMagicWand(point, additive);
 				return;
 			}
 			if (tool === "select-color") {
-				selectByColor(point);
+				selectByColor(point, additive);
 				return;
 			}
 			if (tool === "rect-select" || tool === "ellipse-select") {
 				selecting = true;
 				selectStart = point;
 				selectElliptical = tool === "ellipse-select";
+				selectAdditive = additive;
+				selectBaseMask = additive && editor.selection ? new Uint8Array(editor.selection) : null;
 				updateRectSelection(point);
 				return;
 			}
@@ -603,6 +757,9 @@
 				if (lassoPoints.length === 0) {
 					lassoPoints = [point];
 					lassoHover = point;
+					lassoAdditive = additive;
+					lassoBaseMask =
+						additive && editor.selection ? new Uint8Array(editor.selection) : null;
 				} else {
 					appendLassoPoint(point);
 				}
@@ -660,6 +817,15 @@
 	}
 
 	function handlePointerMove(event: PointerEvent): void {
+		if (draggingMirror) {
+			updateMirrorDrag(event);
+			return;
+		}
+
+		if (!panning && !movingSelection && !selecting && !lassoDragging && !drawing) {
+			hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
+		}
+
 		if (panning) {
 			updatePan(event);
 			return;
@@ -717,6 +883,12 @@
 	}
 
 	function handlePointerUp(event: PointerEvent): void {
+		if (draggingMirror) {
+			draggingMirror = null;
+			releasePointer(event);
+			return;
+		}
+
 		if (panning) {
 			panning = false;
 			releasePointer(event);
@@ -732,6 +904,8 @@
 		if (selecting) {
 			selecting = false;
 			selectStart = null;
+			selectAdditive = false;
+			selectBaseMask = null;
 			releasePointer(event);
 			return;
 		}
@@ -757,6 +931,7 @@
 		if (drawing || selecting || lassoDragging || movingSelection || panning) return;
 		editor.cursor = null;
 		hoveringSelection = false;
+		hoveringMirror = null;
 		if (editor.tool === "lasso") lassoHover = null;
 	}
 

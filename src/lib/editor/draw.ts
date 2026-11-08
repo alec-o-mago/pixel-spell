@@ -1,4 +1,45 @@
+import type { MirrorAxis } from "./types.js";
+
 export type PixelWriter = (x: number, y: number) => void;
+
+function forEachMirroredPoint(
+	x: number,
+	y: number,
+	width: number,
+	height: number,
+	mirrors: readonly MirrorAxis[],
+	write: PixelWriter,
+): void {
+	const combinations = 1 << mirrors.length;
+
+	for (let mask = 0; mask < combinations; mask++) {
+		let px = x;
+		let py = y;
+
+		for (let index = 0; index < mirrors.length; index++) {
+			if ((mask & (1 << index)) === 0) continue;
+			const axis = mirrors[index]!;
+
+			if (axis.kind === "x") {
+				px = Math.round(2 * axis.position - px - 1);
+			} else if (axis.kind === "y") {
+				py = Math.round(2 * axis.position - py - 1);
+			} else if (axis.kind === "diagonal-down") {
+				const nextX = Math.round(py - axis.position);
+				const nextY = Math.round(px + axis.position);
+				px = nextX;
+				py = nextY;
+			} else {
+				const nextX = Math.round(axis.position - py - 1);
+				const nextY = Math.round(axis.position - px - 1);
+				px = nextX;
+				py = nextY;
+			}
+		}
+
+		if (px >= 0 && px < width && py >= 0 && py < height) write(px, py);
+	}
+}
 
 /** Sets a single pixel (with optional symmetry) without applying a brush. */
 export function paintPixel(
@@ -8,8 +49,7 @@ export function paintPixel(
 	x: number,
 	y: number,
 	color: number,
-	mirrorX = false,
-	mirrorY = false,
+	mirrors: readonly MirrorAxis[] = [],
 	clip: Uint8Array | null = null,
 ): void {
 	const set = (px: number, py: number) => {
@@ -18,10 +58,7 @@ export function paintPixel(
 		cel[py * width + px] = color;
 	};
 
-	set(x, y);
-	if (mirrorX) set(width - 1 - x, y);
-	if (mirrorY) set(x, height - 1 - y);
-	if (mirrorX && mirrorY) set(width - 1 - x, height - 1 - y);
+	forEachMirroredPoint(x, y, width, height, mirrors, set);
 }
 
 /** Stamps a square brush of `size` pixels, honoring symmetry. */
@@ -33,8 +70,7 @@ export function paintBrush(
 	y: number,
 	size: number,
 	color: number,
-	mirrorX = false,
-	mirrorY = false,
+	mirrors: readonly MirrorAxis[] = [],
 	clip: Uint8Array | null = null,
 ): void {
 	const span = Math.max(1, Math.round(size));
@@ -47,12 +83,14 @@ export function paintBrush(
 
 	for (let dy = 0; dy < span; dy++) {
 		for (let dx = 0; dx < span; dx++) {
-			const px = x - offset + dx;
-			const py = y - offset + dy;
-			set(px, py);
-			if (mirrorX) set(width - 1 - px, py);
-			if (mirrorY) set(px, height - 1 - py);
-			if (mirrorX && mirrorY) set(width - 1 - px, height - 1 - py);
+			forEachMirroredPoint(
+				x - offset + dx,
+				y - offset + dy,
+				width,
+				height,
+				mirrors,
+				set,
+			);
 		}
 	}
 }
