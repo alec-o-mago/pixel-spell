@@ -69,6 +69,12 @@ export const TOOLS: ToolDef[] = [
 		shortcut: "L",
 	},
 	{
+		id: "curve",
+		label: "Curve",
+		description: "Drag a base line, then click twice to bend it",
+		shortcut: "U",
+	},
+	{
 		id: "rectangle",
 		label: "Rectangle",
 		description: "Draw a rectangle or filled block",
@@ -124,7 +130,7 @@ export function isSelectionTool(tool: ToolId): boolean {
 	return SELECTION_TOOL_IDS.has(tool);
 }
 
-const PIXEL_PERFECT_TOOLS = new Set<ToolId>(["pencil", "eraser"]);
+const PIXEL_PERFECT_TOOLS = new Set<ToolId>(["pencil", "eraser", "curve"]);
 
 /** Tools whose freehand strokes support pixel-perfect corner removal. */
 export function usesPixelPerfect(tool: ToolId): boolean {

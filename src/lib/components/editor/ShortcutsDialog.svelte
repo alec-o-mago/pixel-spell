@@ -20,6 +20,7 @@
 				{ label: "Fill", keys: "G" },
 				{ label: "Eyedropper", keys: "I" },
 				{ label: "Line", keys: "L" },
+				{ label: "Curve", keys: "U" },
 				{ label: "Rectangle", keys: "R" },
 				{ label: "Ellipse", keys: "O" },
 			],

@@ -93,6 +93,8 @@ export class EditorState {
 
 	undoCount = $state(0);
 	redoCount = $state(0);
+	/** Increments only when undo/redo restores a document. */
+	historyActionRevision = $state(0);
 
 	#undo: PixelDoc[] = [];
 	#redo: PixelDoc[] = [];
@@ -363,6 +365,7 @@ export class EditorState {
 		// The selection may no longer match the restored pixels.
 		this.selection = null;
 		this.selectionRevision++;
+		this.historyActionRevision++;
 		this.revision++;
 		this.dirty = true;
 		this.modified = true;

@@ -134,6 +134,44 @@ export function plotLine(
 	}
 }
 
+/** Cubic Bézier curve sampled densely enough to leave a connected pixel path. */
+export function plotCubicCurve(
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	x2: number,
+	y2: number,
+	x3: number,
+	y3: number,
+	write: PixelWriter,
+): void {
+	const controlLength =
+		Math.hypot(x1 - x0, y1 - y0) +
+		Math.hypot(x2 - x1, y2 - y1) +
+		Math.hypot(x3 - x2, y3 - y2);
+	const steps = Math.max(1, Math.ceil(controlLength * 2));
+
+	let previousX = x0;
+	let previousY = y0;
+	write(Math.round(previousX), Math.round(previousY));
+
+	for (let step = 1; step <= steps; step++) {
+		const t = step / steps;
+		const inverse = 1 - t;
+		const a = inverse * inverse * inverse;
+		const b = 3 * inverse * inverse * t;
+		const c = 3 * inverse * t * t;
+		const d = t * t * t;
+		const x = a * x0 + b * x1 + c * x2 + d * x3;
+		const y = a * y0 + b * y1 + c * y2 + d * y3;
+
+		plotLine(previousX, previousY, x, y, write);
+		previousX = x;
+		previousY = y;
+	}
+}
+
 /** Rectangle outline or filled rectangle. */
 export function plotRectangle(
 	x0: number,

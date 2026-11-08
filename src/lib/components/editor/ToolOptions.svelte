@@ -12,6 +12,7 @@
 		editor.tool === "pencil" ||
 			editor.tool === "eraser" ||
 			editor.tool === "line" ||
+			editor.tool === "curve" ||
 			(isShape && !editor.shapeFilled),
 	);
 </script>
@@ -163,6 +164,14 @@
 						</span>
 						<Switch bind:checked={editor.shapeFilled} />
 					</label>
+				{/if}
+
+				{#if editor.tool === "curve"}
+					<div class="rounded-lg border border-dashed bg-muted/30 p-3">
+						<p class="text-[10px] leading-relaxed text-muted-foreground">
+							Drag to draw the base line, then click twice to bend the curve.
+						</p>
+					</div>
 				{/if}
 			{/if}
 		</div>

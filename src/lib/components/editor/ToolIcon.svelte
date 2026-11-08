@@ -8,6 +8,7 @@
 	import Pencil from "@lucide/svelte/icons/pencil";
 	import Pipette from "@lucide/svelte/icons/pipette";
 	import Slash from "@lucide/svelte/icons/slash";
+	import Spline from "@lucide/svelte/icons/spline";
 	import Square from "@lucide/svelte/icons/square";
 	import SquareDashed from "@lucide/svelte/icons/square-dashed";
 	import SwatchBook from "@lucide/svelte/icons/swatch-book";
@@ -38,6 +39,8 @@
 	<Eraser class={className} />
 {:else if tool === "line"}
 	<Slash class={className} />
+{:else if tool === "curve"}
+	<Spline class={className} />
 {:else if tool === "rectangle"}
 	<Square class={className} />
 {:else if tool === "ellipse"}

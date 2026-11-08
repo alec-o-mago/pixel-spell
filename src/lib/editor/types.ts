@@ -9,6 +9,7 @@ export type ToolId =
 	| "pencil"
 	| "eraser"
 	| "line"
+	| "curve"
 	| "rectangle"
 	| "ellipse"
 	| "fill"

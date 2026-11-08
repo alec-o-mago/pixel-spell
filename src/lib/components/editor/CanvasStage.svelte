@@ -11,6 +11,7 @@
 		fillPixels,
 		paintBrush,
 		paintPixel,
+		plotCubicCurve,
 		plotEllipse,
 		plotLine,
 		plotRectangle,
@@ -42,6 +43,16 @@
 	let strokeColor = 0;
 	let strokePath: Point[] = [];
 	let strokePixelPerfect = false;
+
+	type CurvePhase = "idle" | "base" | "adjust1" | "adjust2";
+	let curvePhase: CurvePhase = "idle";
+	let curveDragging = false;
+	let curveStart: Point | null = null;
+	let curveEnd: Point | null = null;
+	let curveControl1: Point | null = null;
+	let curveControl2: Point | null = null;
+	let curveBackup: Uint32Array | null = null;
+	let curveHistoryPushed = false;
 
 	let panning = $state(false);
 	let panOrigin = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 };
@@ -80,6 +91,7 @@
 		editor.tool === "pencil" ||
 			editor.tool === "eraser" ||
 			editor.tool === "line" ||
+			editor.tool === "curve" ||
 			((editor.tool === "rectangle" || editor.tool === "ellipse") && !editor.shapeFilled)
 			? editor.brushSize
 			: 1,
@@ -159,12 +171,25 @@
 	$effect(() => {
 		const tool = editor.tool;
 		if (tool !== "lasso") resetLasso();
+		if (tool !== "curve" && curvePhase !== "idle") finishCurve();
 	});
 
 	$effect(() => {
 		editor.activeProjectId;
 		resetLasso();
+		resetCurveState(false);
 		selecting = false;
+	});
+
+	$effect(() => {
+		editor.activeLayerId;
+		editor.activeFrame;
+		if (curvePhase !== "idle") finishCurve();
+	});
+
+	$effect(() => {
+		editor.historyActionRevision;
+		if (curvePhase !== "idle") resetCurveState(false);
 	});
 
 	function pixelFromEvent(event: PointerEvent, clampToCanvas = false): Point | null {
@@ -336,18 +361,82 @@
 		}
 	}
 
-	function appendPixelPerfectPoint(x: number, y: number): boolean {
-		const lastPoint = strokePath[strokePath.length - 1];
+	function drawCurvePreview(cel: Uint32Array): void {
+		if (!curveBackup || !curveStart || !curveEnd) return;
+		cel.set(curveBackup);
+
+		const control1 = curveControl1 ?? curveStart;
+		const control2 = curveControl2 ?? curveEnd;
+		const stroke = (x: number, y: number) =>
+			paintBrush(
+				cel,
+				editor.doc.width,
+				editor.doc.height,
+				x,
+				y,
+				editor.brushSize,
+				strokeColor,
+				editor.mirrorAxes,
+				editor.selection,
+				editor.lockAlpha,
+			);
+
+		const rawPath: Point[] = [];
+		plotCubicCurve(
+			curveStart.x,
+			curveStart.y,
+			control1.x,
+			control1.y,
+			control2.x,
+			control2.y,
+			curveEnd.x,
+			curveEnd.y,
+			(x, y) => rawPath.push({ x, y }),
+		);
+
+		const path =
+			editor.pixelPerfect && usesPixelPerfect("curve")
+				? filterPixelPerfectPath(rawPath)
+				: rawPath;
+		for (const point of path) stroke(point.x, point.y);
+		editor.touch();
+	}
+
+	function resetCurveState(restorePreview: boolean): void {
+		if (restorePreview && curveBackup) {
+			const cel = editor.activeLayer.cels[editor.activeFrame];
+			if (cel) {
+				cel.set(curveBackup);
+				editor.touch();
+			}
+		}
+
+		curvePhase = "idle";
+		curveDragging = false;
+		curveStart = null;
+		curveEnd = null;
+		curveControl1 = null;
+		curveControl2 = null;
+		curveBackup = null;
+		curveHistoryPushed = false;
+	}
+
+	function finishCurve(): void {
+		resetCurveState(false);
+	}
+
+	function appendPixelPerfectPointTo(path: Point[], x: number, y: number): boolean {
+		const lastPoint = path[path.length - 1];
 		if (lastPoint && lastPoint.x === x && lastPoint.y === y) return false;
 
-		strokePath.push({ x, y });
+		path.push({ x, y });
 		let removed = false;
 
-		while (strokePath.length >= 3) {
-			const length = strokePath.length;
-			const a = strokePath[length - 3]!;
-			const b = strokePath[length - 2]!;
-			const c = strokePath[length - 1]!;
+		while (path.length >= 3) {
+			const length = path.length;
+			const a = path[length - 3]!;
+			const b = path[length - 2]!;
+			const c = path[length - 1]!;
 
 			const diagonal = Math.abs(a.x - c.x) === 1 && Math.abs(a.y - c.y) === 1;
 			const bTouchesA =
@@ -360,7 +449,7 @@
 				(b.x === c.x || b.y === c.y);
 
 			if (diagonal && bTouchesA && bTouchesC) {
-				strokePath.splice(length - 2, 1);
+				path.splice(length - 2, 1);
 				removed = true;
 				continue;
 			}
@@ -368,6 +457,16 @@
 		}
 
 		return removed;
+	}
+
+	function appendPixelPerfectPoint(x: number, y: number): boolean {
+		return appendPixelPerfectPointTo(strokePath, x, y);
+	}
+
+	function filterPixelPerfectPath(points: readonly Point[]): Point[] {
+		const path: Point[] = [];
+		for (const point of points) appendPixelPerfectPointTo(path, point.x, point.y);
+		return path;
 	}
 
 	function repaintPixelPerfectStroke(cel: Uint32Array): void {
@@ -858,13 +957,38 @@
 		}
 
 		if (!isDrawable) return;
-		if (editor.selection && !isPointSelected(point)) return;
-
-		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 
 		const layer = editor.activeLayer;
 		const cel = layer.cels[editor.activeFrame];
 		if (!cel) return;
+
+		if (tool === "curve") {
+			if (curvePhase === "idle") {
+				if (editor.selection && !isPointSelected(point)) return;
+				strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
+				curveStart = point;
+				curveEnd = point;
+				curveControl1 = point;
+				curveControl2 = point;
+				curveBackup = new Uint32Array(cel);
+				curveHistoryPushed = false;
+				curvePhase = "base";
+				curveDragging = true;
+				return;
+			}
+
+			if (curvePhase === "adjust1") {
+				curveControl1 = point;
+			} else if (curvePhase === "adjust2") {
+				curveControl2 = point;
+			}
+			curveDragging = true;
+			drawCurvePreview(cel);
+			return;
+		}
+
+		if (editor.selection && !isPointSelected(point)) return;
+		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 
 		if (tool === "fill") {
 			editor.pushHistory();
@@ -944,6 +1068,36 @@
 			return;
 		}
 
+		if (editor.tool === "curve" && curvePhase !== "idle") {
+			const point = pixelFromEvent(event, true);
+			if (!point) return;
+			editor.cursor = point;
+
+			if (curvePhase === "base" && curveDragging) {
+				if (!curveEnd || curveEnd.x !== point.x || curveEnd.y !== point.y) {
+					curveEnd = point;
+					if (!curveHistoryPushed) {
+						editor.pushHistory();
+						curveHistoryPushed = true;
+					}
+					const cel = editor.activeLayer.cels[editor.activeFrame];
+					if (cel) drawCurvePreview(cel);
+				}
+				return;
+			}
+
+			if (curveDragging) {
+				if (curvePhase === "adjust1") {
+					curveControl1 = point;
+				} else if (curvePhase === "adjust2") {
+					curveControl2 = point;
+				}
+				const cel = editor.activeLayer.cels[editor.activeFrame];
+				if (cel) drawCurvePreview(cel);
+			}
+			return;
+		}
+
 		const point = pixelFromEvent(event);
 		editor.cursor = point;
 
@@ -976,6 +1130,30 @@
 		if (draggingMirror) {
 			draggingMirror = null;
 			releasePointer(event);
+			return;
+		}
+
+		if (editor.tool === "curve" && curvePhase !== "idle") {
+			if (curveDragging) {
+				if (curvePhase === "base") {
+					if (
+						!curveStart ||
+						!curveEnd ||
+						(curveStart.x === curveEnd.x && curveStart.y === curveEnd.y)
+					) {
+						resetCurveState(curveHistoryPushed);
+					} else {
+						curvePhase = "adjust1";
+					}
+				} else if (curvePhase === "adjust1") {
+					curvePhase = "adjust2";
+				} else if (curvePhase === "adjust2") {
+					finishCurve();
+				}
+			}
+			curveDragging = false;
+			releasePointer(event);
+			editor.cursor = pixelFromEvent(event);
 			return;
 		}
 
