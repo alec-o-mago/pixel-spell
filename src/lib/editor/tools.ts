@@ -9,6 +9,48 @@ export interface ToolDef {
 
 export const TOOLS: ToolDef[] = [
 	{
+		id: "pan",
+		label: "Pan",
+		description: "Drag the canvas to pan around",
+		shortcut: "H",
+	},
+	{
+		id: "zoom",
+		label: "Zoom",
+		description: "Left-click to zoom in, right-click to zoom out",
+		shortcut: "Z",
+	},
+	{
+		id: "magic-wand",
+		label: "Magic wand",
+		description: "Select a connected area of matching pixels",
+		shortcut: "W",
+	},
+	{
+		id: "rect-select",
+		label: "Rectangle select",
+		description: "Select a rectangular area",
+		shortcut: "M",
+	},
+	{
+		id: "ellipse-select",
+		label: "Ellipse select",
+		description: "Select an elliptical area",
+		shortcut: "⇧M",
+	},
+	{
+		id: "lasso",
+		label: "Lasso",
+		description: "Draw a freehand or polygonal selection",
+		shortcut: "Q",
+	},
+	{
+		id: "select-color",
+		label: "Select by color",
+		description: "Select every pixel matching the clicked color",
+		shortcut: "C",
+	},
+	{
 		id: "pencil",
 		label: "Pencil",
 		description: "Draw freehand pixels",
@@ -57,5 +99,27 @@ export const TOOL_BY_ID = Object.fromEntries(
 ) as Record<ToolId, ToolDef>;
 
 export const TOOL_SHORTCUTS = Object.fromEntries(
-	TOOLS.map((tool) => [tool.shortcut.toLowerCase(), tool.id]),
+	TOOLS.filter((tool) => !tool.shortcut.startsWith("⇧")).map((tool) => [
+		tool.shortcut.toLowerCase(),
+		tool.id,
+	]),
 ) as Record<string, ToolId>;
+
+export const TOOL_SHIFT_SHORTCUTS = Object.fromEntries(
+	TOOLS.filter((tool) => tool.shortcut.startsWith("⇧")).map((tool) => [
+		tool.shortcut.slice(1).toLowerCase(),
+		tool.id,
+	]),
+) as Record<string, ToolId>;
+
+const SELECTION_TOOL_IDS = new Set<ToolId>([
+	"magic-wand",
+	"rect-select",
+	"ellipse-select",
+	"lasso",
+	"select-color",
+]);
+
+export function isSelectionTool(tool: ToolId): boolean {
+	return SELECTION_TOOL_IDS.has(tool);
+}

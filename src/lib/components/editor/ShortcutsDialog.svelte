@@ -8,6 +8,13 @@
 		{
 			title: "Tools",
 			items: [
+				{ label: "Pan", keys: "H" },
+				{ label: "Zoom", keys: "Z" },
+				{ label: "Magic wand", keys: "W" },
+				{ label: "Rectangle select", keys: "M" },
+				{ label: "Ellipse select", keys: "⇧M" },
+				{ label: "Lasso", keys: "Q" },
+				{ label: "Select by color", keys: "C" },
 				{ label: "Pencil", keys: "B" },
 				{ label: "Eraser", keys: "E" },
 				{ label: "Fill", keys: "G" },

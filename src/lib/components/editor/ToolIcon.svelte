@@ -1,17 +1,38 @@
 <script lang="ts">
 	import Circle from "@lucide/svelte/icons/circle";
+	import CircleDashed from "@lucide/svelte/icons/circle-dashed";
 	import Eraser from "@lucide/svelte/icons/eraser";
+	import Hand from "@lucide/svelte/icons/hand";
+	import LassoSelect from "@lucide/svelte/icons/lasso-select";
 	import PaintBucket from "@lucide/svelte/icons/paint-bucket";
 	import Pencil from "@lucide/svelte/icons/pencil";
 	import Pipette from "@lucide/svelte/icons/pipette";
 	import Slash from "@lucide/svelte/icons/slash";
 	import Square from "@lucide/svelte/icons/square";
+	import SquareDashed from "@lucide/svelte/icons/square-dashed";
+	import SwatchBook from "@lucide/svelte/icons/swatch-book";
+	import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
+	import ZoomIn from "@lucide/svelte/icons/zoom-in";
 	import type { ToolId } from "$lib/editor/types.js";
 
 	let { tool, class: className = "size-4" }: { tool: ToolId; class?: string } = $props();
 </script>
 
-{#if tool === "pencil"}
+{#if tool === "pan"}
+	<Hand class={className} />
+{:else if tool === "zoom"}
+	<ZoomIn class={className} />
+{:else if tool === "magic-wand"}
+	<WandSparkles class={className} />
+{:else if tool === "rect-select"}
+	<SquareDashed class={className} />
+{:else if tool === "ellipse-select"}
+	<CircleDashed class={className} />
+{:else if tool === "lasso"}
+	<LassoSelect class={className} />
+{:else if tool === "select-color"}
+	<SwatchBook class={className} />
+{:else if tool === "pencil"}
 	<Pencil class={className} />
 {:else if tool === "eraser"}
 	<Eraser class={className} />

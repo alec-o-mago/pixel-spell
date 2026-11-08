@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Button } from "$lib/components/ui/button/index.js";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -14,6 +15,19 @@
 			(isShape && !editor.shapeFilled),
 	);
 </script>
+
+{#snippet deselectAction()}
+	{#if editor.hasSelection}
+		<Button
+			variant="outline"
+			size="sm"
+			class="w-full"
+			onclick={() => editor.clearSelection()}
+		>
+			Deselect
+		</Button>
+	{/if}
+{/snippet}
 
 <section class="flex min-h-0 flex-1 flex-col">
 	<header class="flex h-11 shrink-0 items-center gap-2.5 border-b px-4">
@@ -35,7 +49,53 @@
 
 	<div class="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
 		<div class="space-y-5">
-			{#if editor.tool === "eyedropper"}
+			{#if editor.tool === "pan"}
+				<p class="text-[10px] leading-relaxed text-muted-foreground">
+					Drag anywhere on the canvas to pan. The pan tool works even when the active layer is
+					locked or hidden.
+				</p>
+			{:else if editor.tool === "zoom"}
+				<p class="text-[10px] leading-relaxed text-muted-foreground">
+					Left-click to zoom in and right-click to zoom out. Zooming stays focused on the
+					point under the pointer.
+				</p>
+			{:else if editor.tool === "magic-wand"}
+				<label
+					class="flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
+				>
+					<span class="grid gap-0.5">
+						<span class="text-xs font-medium">Diagonal connections</span>
+						<span class="text-[10px] leading-snug text-muted-foreground">
+							Include pixels that touch at a corner as part of the same area.
+						</span>
+					</span>
+					<Switch bind:checked={editor.magicWandDiagonal} />
+				</label>
+				{@render deselectAction()}
+			{:else if editor.tool === "rect-select"}
+				<p class="text-[10px] leading-relaxed text-muted-foreground">
+					Selects a rectangular area. Drag inside an existing selection to move its pixels.
+				</p>
+				{@render deselectAction()}
+			{:else if editor.tool === "ellipse-select"}
+				<p class="text-[10px] leading-relaxed text-muted-foreground">
+					Selects an elliptical area. Drag inside an existing selection to move its pixels.
+				</p>
+				{@render deselectAction()}
+			{:else if editor.tool === "lasso"}
+				<div class="rounded-lg border border-dashed bg-muted/30 p-3">
+					<p class="text-[10px] leading-relaxed text-muted-foreground">
+						Drag to draw freehand, or click to place polygon points — mix both freely. Finish by
+						returning to the start point or right-clicking to close with a straight line.
+					</p>
+				</div>
+				{@render deselectAction()}
+			{:else if editor.tool === "select-color"}
+				<p class="text-[10px] leading-relaxed text-muted-foreground">
+					Selects every pixel on the active layer that exactly matches the clicked color.
+				</p>
+				{@render deselectAction()}
+			{:else if editor.tool === "eyedropper"}
 				<label
 					class="flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
 				>

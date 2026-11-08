@@ -10,9 +10,11 @@ export function paintPixel(
 	color: number,
 	mirrorX = false,
 	mirrorY = false,
+	clip: Uint8Array | null = null,
 ): void {
 	const set = (px: number, py: number) => {
 		if (px < 0 || px >= width || py < 0 || py >= height) return;
+		if (clip && !clip[py * width + px]) return;
 		cel[py * width + px] = color;
 	};
 
@@ -33,11 +35,13 @@ export function paintBrush(
 	color: number,
 	mirrorX = false,
 	mirrorY = false,
+	clip: Uint8Array | null = null,
 ): void {
 	const span = Math.max(1, Math.round(size));
 	const offset = Math.floor((span - 1) / 2);
 	const set = (px: number, py: number) => {
 		if (px < 0 || px >= width || py < 0 || py >= height) return;
+		if (clip && !clip[py * width + px]) return;
 		cel[py * width + px] = color;
 	};
 
@@ -212,16 +216,21 @@ export function fillPixels(
 	color: number,
 	tolerance: number,
 	contiguous: boolean,
+	clip: Uint8Array | null = null,
 ): boolean {
 	if (x < 0 || x >= width || y < 0 || y >= height) return false;
 
-	const target = cel[y * width + x];
+	const startIndex = y * width + x;
+	if (clip && !clip[startIndex]) return false;
+
+	const target = cel[startIndex];
 	if (target === color) return false;
 
 	let changed = false;
 
 	if (!contiguous) {
 		for (let i = 0; i < cel.length; i++) {
+			if (clip && !clip[i]) continue;
 			if (colorMatches(cel[i], target, tolerance)) {
 				cel[i] = color;
 				changed = true;
@@ -231,12 +240,13 @@ export function fillPixels(
 	}
 
 	const visited = new Uint8Array(width * height);
-	const stack: number[] = [y * width + x];
+	const stack: number[] = [startIndex];
 
 	while (stack.length > 0) {
 		const index = stack.pop()!;
 		if (visited[index]) continue;
 		visited[index] = 1;
+		if (clip && !clip[index]) continue;
 
 		if (!colorMatches(cel[index], target, tolerance)) continue;
 

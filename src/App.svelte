@@ -10,7 +10,7 @@
 	import ShortcutsDialog from "$lib/components/editor/ShortcutsDialog.svelte";
 	import ToolStrip from "$lib/components/editor/ToolStrip.svelte";
 	import { editor } from "$lib/editor/editor.svelte.js";
-	import { TOOL_SHORTCUTS } from "$lib/editor/tools.js";
+	import { TOOL_SHIFT_SHORTCUTS, TOOL_SHORTCUTS } from "$lib/editor/tools.js";
 
 	let newDialogOpen = $state(false);
 	let shortcutsOpen = $state(false);
@@ -75,6 +75,14 @@
 			return;
 		}
 
+		if (event.shiftKey) {
+			const shiftTool = TOOL_SHIFT_SHORTCUTS[key];
+			if (shiftTool) {
+				editor.setTool(shiftTool);
+				return;
+			}
+		}
+
 		const tool = TOOL_SHORTCUTS[key];
 		if (tool) {
 			editor.setTool(tool);
@@ -96,6 +104,7 @@
 		}
 		if (event.key === "Escape") {
 			editor.playing = false;
+			editor.clearSelection();
 		}
 	}
 </script>

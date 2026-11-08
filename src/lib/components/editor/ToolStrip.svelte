@@ -6,14 +6,17 @@
 	import { TOOLS } from "$lib/editor/tools.js";
 	import { cn } from "$lib/utils.js";
 	import ToolIcon from "./ToolIcon.svelte";
+
+	// Pan/zoom | selection tools | paint tools | fill/eyedropper
+	const SEPARATOR_BEFORE = new Set([2, 7, 12]);
 </script>
 
 <aside
-	class="flex w-14 shrink-0 flex-col items-center gap-1 border-r bg-muted/20 py-2"
+	class="flex w-14 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-muted/20 py-2"
 	aria-label="Tools"
 >
 	{#each TOOLS as tool, index (tool.id)}
-		{#if index === 5}
+		{#if SEPARATOR_BEFORE.has(index)}
 			<Separator class="my-1 w-7" />
 		{/if}
 

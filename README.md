@@ -6,8 +6,9 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 ## Features
 
-- **Drawing tools** — pencil, eraser, line, rectangle, ellipse, paint bucket, and eyedropper.
-- **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, and layer-aware color sampling. X/Y mirror toggles live in the top bar, next to the theme switch.
+- **Drawing tools** — pencil, eraser, line, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools.
+- **Selections** — magic wand (with optional diagonal connections), separate rectangle and ellipse marquee tools, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; edits are clipped to the selected area. Deselect with the panel button or `Esc`.
+- **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, layer-aware color sampling, and selection options. X/Y mirror toggles live in the top bar, next to the theme switch.
 - **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, hex input, and a 32-color palette you can extend. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them.
@@ -50,6 +51,13 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 
 | Action              | Shortcut                 |
 | ------------------- | ------------------------ |
+| Pan                 | `H`                      |
+| Zoom                | `Z`                      |
+| Magic wand          | `W`                      |
+| Rectangle select    | `M`                      |
+| Ellipse select      | `Shift+M`                |
+| Lasso               | `Q`                      |
+| Select by color     | `C`                      |
 | Pencil              | `B`                      |
 | Eraser              | `E`                      |
 | Line                | `L`                      |
@@ -63,6 +71,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
 | Toggle pixel grid   | `Shift+G`                |
+| Deselect            | `Esc`                    |
 | Resize timeline     | Drag divider, or `↑` / `↓` |
 
 Shortcuts are ignored while typing in an input. The Help menu also lists them.

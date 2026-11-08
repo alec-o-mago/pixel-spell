@@ -34,6 +34,7 @@ interface ProjectSnapshot {
 	activeLayerId: string;
 	activeFrame: number;
 	zoom: number | null;
+	selection: Uint8Array | null;
 	undo: PixelDoc[];
 	redo: PixelDoc[];
 }
@@ -59,6 +60,11 @@ export class EditorState {
 	fillTolerance = $state(0);
 	fillContiguous = $state(true);
 	sampleAllLayers = $state(true);
+	magicWandDiagonal = $state(false);
+
+	/** Selected pixel mask for the active document, or null when nothing is selected. */
+	selection = $state<Uint8Array | null>(null);
+	selectionRevision = $state(0);
 
 	showGrid = $state(true);
 	zoom = $state<number | null>(null);
@@ -98,6 +104,7 @@ export class EditorState {
 			activeLayerId: this.activeLayerId,
 			activeFrame: this.activeFrame,
 			zoom: this.zoom,
+			selection: null,
 			undo: [],
 			redo: [],
 		});
@@ -120,6 +127,10 @@ export class EditorState {
 
 	get frameCount(): number {
 		return this.doc.frames.length;
+	}
+
+	get hasSelection(): boolean {
+		return this.selection !== null;
 	}
 
 	get currentColor(): number {
@@ -145,6 +156,17 @@ export class EditorState {
 
 	setTool(tool: ToolId): void {
 		this.tool = tool;
+	}
+
+	setSelection(mask: Uint8Array | null): void {
+		this.selection = mask;
+		this.selectionRevision++;
+	}
+
+	clearSelection(): void {
+		if (!this.selection) return;
+		this.selection = null;
+		this.selectionRevision++;
 	}
 
 	setPrimaryColor(hex: string): void {
@@ -250,6 +272,9 @@ export class EditorState {
 		}
 		this.activeFrame = clamp(this.activeFrame, 0, this.doc.frames.length - 1);
 		this.playing = false;
+		// The selection may no longer match the restored pixels.
+		this.selection = null;
+		this.selectionRevision++;
 		this.revision++;
 		this.dirty = true;
 		this.modified = true;
@@ -267,6 +292,7 @@ export class EditorState {
 		snapshot.activeLayerId = this.activeLayerId;
 		snapshot.activeFrame = this.activeFrame;
 		snapshot.zoom = this.zoom;
+		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
 	}
@@ -281,6 +307,8 @@ export class EditorState {
 		this.activeLayerId = snapshot.activeLayerId;
 		this.activeFrame = snapshot.activeFrame;
 		this.zoom = snapshot.zoom;
+		this.selection = snapshot.selection;
+		this.selectionRevision++;
 		this.name = tab.name;
 		this.dirty = tab.dirty;
 		this.modified = tab.modified;
@@ -362,6 +390,7 @@ export class EditorState {
 			activeLayerId: doc.layers[0].id,
 			activeFrame: 0,
 			zoom: null,
+			selection: null,
 			undo: [],
 			redo: [],
 		});
@@ -384,6 +413,7 @@ export class EditorState {
 			activeLayerId,
 			activeFrame,
 			zoom: null,
+			selection: null,
 			undo: [],
 			redo: [],
 		});
@@ -520,16 +550,29 @@ export class EditorState {
 		const layer = this.activeLayer;
 		if (!layer) return;
 		this.pushHistory();
-		layer.cels[this.activeFrame]?.fill(0);
+		const cel = layer.cels[this.activeFrame];
+		if (cel) this.#clearCel(cel);
 		this.revision++;
 	}
 
 	clearFrame(): void {
 		this.pushHistory();
 		for (const layer of this.doc.layers) {
-			layer.cels[this.activeFrame]?.fill(0);
+			const cel = layer.cels[this.activeFrame];
+			if (cel) this.#clearCel(cel);
 		}
 		this.revision++;
+	}
+
+	#clearCel(cel: Uint32Array): void {
+		const mask = this.selection;
+		if (!mask) {
+			cel.fill(0);
+			return;
+		}
+		for (let i = 0; i < cel.length; i++) {
+			if (mask[i]) cel[i] = 0;
+		}
 	}
 
 	selectFrame(index: number): void {

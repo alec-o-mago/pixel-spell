@@ -1,4 +1,11 @@
 export type ToolId =
+	| "pan"
+	| "zoom"
+	| "magic-wand"
+	| "rect-select"
+	| "ellipse-select"
+	| "lasso"
+	| "select-color"
 	| "pencil"
 	| "eraser"
 	| "line"
