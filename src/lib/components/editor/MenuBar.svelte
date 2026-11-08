@@ -268,7 +268,7 @@
 						aria-label="Toggle X axis mirror"
 						aria-pressed={editor.mirrorX}
 					>
-						<FlipVertical2 class="size-4" />
+						<FlipHorizontal2 class="size-4" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
@@ -289,7 +289,7 @@
 						aria-label="Toggle Y axis mirror"
 						aria-pressed={editor.mirrorY}
 					>
-						<FlipHorizontal2 class="size-4" />
+						<FlipVertical2 class="size-4" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
