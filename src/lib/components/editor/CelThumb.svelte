@@ -1,14 +1,13 @@
 <script lang="ts">
-	import { drawThumbnail } from "$lib/editor/render.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
+	import { drawThumbnail } from "$lib/editor/render.js";
 	import type { Layer } from "$lib/editor/types.js";
 
-	let { layer }: { layer: Layer } = $props();
+	let { layer, frame }: { layer: Layer; frame: number } = $props();
 	let canvas: HTMLCanvasElement;
 
 	$effect(() => {
 		const doc = editor.doc;
-		const frame = editor.activeFrame;
 		editor.revision;
 
 		if (!canvas) return;

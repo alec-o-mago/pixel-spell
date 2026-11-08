@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import AboutDialog from "$lib/components/editor/AboutDialog.svelte";
-	import BottomPanel from "$lib/components/editor/BottomPanel.svelte";
+	import TimelineDock from "$lib/components/editor/TimelineDock.svelte";
 	import CanvasStage from "$lib/components/editor/CanvasStage.svelte";
 	import LeftPanel from "$lib/components/editor/LeftPanel.svelte";
 	import MenuBar from "$lib/components/editor/MenuBar.svelte";
@@ -113,7 +113,7 @@
 
 			<main class="flex min-w-0 flex-1 flex-col">
 				<CanvasStage />
-				<BottomPanel />
+				<TimelineDock />
 			</main>
 		</div>
 	</div>

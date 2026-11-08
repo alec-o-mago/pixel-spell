@@ -46,6 +46,10 @@ Key files:
 | `lib/editor/file.ts` | PNG/sprite-sheet export, project save/parse |
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Default 32-color palette |
+| `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
+| `lib/components/editor/TimelineLayerRow.svelte` | Sticky layer header and cel cells for one layer row |
+| `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
+| `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
 
 ## State and reactivity
 
@@ -53,7 +57,7 @@ Key files:
 - `editor.doc` is a `$state` proxy, so layer names, visibility, opacity, frame arrays, etc. are reactive.
 - Pixel data lives in `Uint32Array` cels. Typed arrays are **not** deeply proxied, so mutating pixels will not trigger a re-render on its own. Call `editor.touch()` (increments `revision`) after changing pixel data, or increment `editor.revision` after structural changes that do not already do so.
 - Any mutation that should be undoable must call `editor.pushHistory()` **before** the change. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
-- `editor.revision` is the render invalidation signal. `CanvasStage`, `LayerThumb`, and `FrameThumb` read it inside `$effect`.
+- `editor.revision` is the render invalidation signal. `CanvasStage` and `CelThumb` read it inside `$effect`.
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
 
 ## Pixel format
@@ -101,6 +105,21 @@ When adding a tool:
 - The `Slider` component requires `type="single"` (bits-ui does not infer it). Use `type="single"` for all single-value sliders.
 - Tooltips on the tool strip are required; new tool buttons should follow the same `Tooltip.Root` + `Trigger` + `Content` pattern.
 
+## Timeline and resizing
+
+- The timeline is a single table, not separate layers/frames panels:
+  - Rows are layers, displayed top-to-bottom with `[...editor.doc.layers].reverse()`.
+  - Columns are animation frames, plus a trailing add-frame column and a filler column that absorbs extra width.
+  - Clicking a cel selects both its layer and frame. Clicking a frame header selects only the frame; clicking a layer name selects only the layer.
+  - The header row and the layer column are sticky (`position: sticky`) inside an `overflow-auto` container. Keep `border-separate border-spacing-0` and opaque header backgrounds, or scrolled content will show through.
+  - The active frame header is `bg-primary`; the active layer row and active frame column use subtle accent backgrounds; the active cel has a primary ring.
+  - The opacity footer below the table controls the active layer.
+- `TimelineDock.svelte` owns the split between canvas and timeline:
+  - Height is local `$state`, clamped to 180 px minimum and `window.innerHeight - 44 - 140` maximum.
+  - Persisted in `localStorage` under `pixel-spell-timeline-height`.
+  - The divider is a focusable `role="separator"` with pointer capture. Dragging up grows the timeline; `↑`/`↓` resize by 16 px (48 px with Shift), `Home`/`End` jump to the limits.
+  - The divider is intentionally a `div` with `tabindex="0"`; Svelte's a11y warnings are suppressed for this ARIA window-splitter pattern.
+
 ## Layout contract
 
 The shell is intentionally:
@@ -111,7 +130,8 @@ Menu bar
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
     ├── Canvas (fit/zoom, grid, cursor, floating zoom pill)
-    └── Bottom panel (layers vertical list + frames horizontal timeline)
+    ├── Resizable divider (drag, or focus and use ↑/↓)
+    └── Timeline (Aseprite-style table: layer rows × frame columns, sticky headers, cel thumbnails, opacity footer)
 ```
 
 Preserve these regions and their relative placement when making changes.
@@ -128,14 +148,17 @@ Preserve these regions and their relative placement when making changes.
 - Vite HMR re-evaluates the state module and resets the in-memory document. This is expected during development; do not treat it as a bug.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
-- `$effect` in `FramesPanel` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
+- `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
 - The canvas scroll area uses `w-max` inside a centering flex container so oversized manual zoom levels remain reachable in both directions.
+- The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
+- Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Layer visibility/opacity are document-wide. Per-frame visibility would require a model change and UI work.
 
 ## Definition of done
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
-- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, frame operations, and playback still work.
+- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, frame operations, playback, cel selection, and timeline resizing still work.
+- The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.
 - New UI matches the existing modern shadcn aesthetic and respects the layout contract.
 - Update `README.md` when user-facing behavior or shortcuts change.

@@ -8,8 +8,8 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 - **Drawing tools** — pencil, eraser, line, rectangle, ellipse, paint bucket, and eyedropper.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, X/Y symmetry, fill tolerance and contiguous fill, and layer-aware color sampling.
-- **Layers** — add, duplicate, reorder, rename, hide, delete, and adjust opacity. Layers are shared across the animation.
-- **Frames** — add, duplicate, and delete frames, each with independent cels per layer. Play the animation at 1–60 fps.
+- **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
+- **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — hex input, native color picker, alpha slider, and a 32-color palette you can extend.
 - **History** — 80-step undo/redo stack with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
@@ -62,6 +62,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
 | Toggle pixel grid   | `Shift+G`                |
+| Resize timeline     | Drag divider, or `↑` / `↓` |
 
 Shortcuts are ignored while typing in an input. The Help menu also lists them.
 
@@ -73,7 +74,7 @@ src/
 ├── app.css                     # Tailwind, shadcn theme, editor surface styles
 └── lib/
     ├── components/
-    │   ├── editor/             # Menu bar, tool strip, panels, canvas, dialogs
+    │   ├── editor/             # Menu bar, tool strip, tool/color panels, canvas, timeline, dialogs
     │   └── ui/                 # shadcn-svelte components
     └── editor/
         ├── editor.svelte.ts    # Reactive editor state (Svelte 5 runes)
@@ -101,6 +102,7 @@ Project files store each cel as a base64 string, so they are portable between br
 
 ## Notes and limitations
 
+- The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no selection or move tool yet.
 - The editor does not auto-save. Use **File → Save project** to keep your work.
