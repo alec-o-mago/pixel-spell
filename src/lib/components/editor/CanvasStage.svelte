@@ -37,6 +37,7 @@
 
 	let stage: HTMLDivElement | undefined;
 	let canvas: HTMLCanvasElement | undefined;
+	let overlayCanvas: HTMLCanvasElement | undefined;
 	let mirrorCanvas: HTMLCanvasElement | undefined;
 
 	let drawing = false;
@@ -178,10 +179,6 @@
 		const frame = editor.activeFrame;
 		const currentZoom = editor.effectiveZoom;
 		editor.revision;
-		editor.selectionRevision;
-		const selection = editor.selection;
-		const lasso = lassoPoints;
-		const hover = lassoHover;
 
 		if (!canvas) return;
 		const pixels = compositeFrame(doc, frame);
@@ -193,10 +190,26 @@
 			doc.width * currentZoom,
 			doc.height * currentZoom,
 		);
-		const context = canvas.getContext("2d");
-		if (context) {
-			drawOverlay(context, selection, lasso, hover, doc.width, doc.height);
-		}
+	});
+
+	$effect(() => {
+		const doc = editor.doc;
+		const currentZoom = editor.effectiveZoom;
+		const selection = editor.selection;
+		editor.selectionRevision;
+		const lasso = lassoPoints;
+		const hover = lassoHover;
+
+		if (!overlayCanvas) return;
+		const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+		const bufferWidth = Math.max(1, Math.round(doc.width * currentZoom * dpr));
+		const bufferHeight = Math.max(1, Math.round(doc.height * currentZoom * dpr));
+		if (overlayCanvas.width !== bufferWidth) overlayCanvas.width = bufferWidth;
+		if (overlayCanvas.height !== bufferHeight) overlayCanvas.height = bufferHeight;
+
+		const context = overlayCanvas.getContext("2d");
+		if (!context) return;
+		drawOverlay(context, selection, lasso, hover, doc.width, doc.height);
 	});
 
 	$effect(() => {
@@ -945,6 +958,7 @@
 
 		context.save();
 		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, context.canvas.width, context.canvas.height);
 		context.lineJoin = "round";
 		context.lineCap = "butt";
 
@@ -1538,6 +1552,14 @@
 				}}
 				oncontextmenu={(event) => event.preventDefault()}
 				aria-label="Pixel art canvas"
+			></canvas>
+
+			<canvas
+				bind:this={overlayCanvas}
+				class="pointer-events-none absolute inset-0 block"
+				style:width={`${canvasWidth}px`}
+				style:height={`${canvasHeight}px`}
+				aria-hidden="true"
 			></canvas>
 
 			{#if editor.showGrid && zoom >= 6}

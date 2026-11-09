@@ -61,6 +61,7 @@ Key files:
 - Pixel data lives in `Uint32Array` cels. Typed arrays are **not** deeply proxied, so mutating pixels will not trigger a re-render on its own. Call `editor.touch()` (increments `revision`) after changing pixel data, or increment `editor.revision` after structural changes that do not already do so.
 - Any mutation that should be undoable must call `editor.pushHistory()` **before** the change. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
 - `editor.revision` is the render invalidation signal. `CanvasStage` and `CelThumb` read it inside `$effect`.
+- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrame()` or a full sprite redraw.
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
 
 ## Projects and tabs
