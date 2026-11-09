@@ -25,15 +25,28 @@
 		}
 	});
 
+	const NON_TEXT_INPUT_TYPES = new Set([
+		"button",
+		"checkbox",
+		"color",
+		"file",
+		"hidden",
+		"image",
+		"radio",
+		"range",
+		"reset",
+		"submit",
+	]);
+
 	function isTypingTarget(target: EventTarget | null): boolean {
 		const element = target as HTMLElement | null;
 		if (!element) return false;
-		return (
-			element.tagName === "INPUT" ||
-			element.tagName === "TEXTAREA" ||
-			element.tagName === "SELECT" ||
-			element.isContentEditable
-		);
+		if (element.isContentEditable) return true;
+
+		if (element.tagName === "TEXTAREA" || element.tagName === "SELECT") return true;
+		if (element.tagName !== "INPUT") return false;
+
+		return !NON_TEXT_INPUT_TYPES.has((element as HTMLInputElement).type);
 	}
 
 	function handleKeydown(event: KeyboardEvent): void {
@@ -62,6 +75,11 @@
 			if (key === "s") {
 				event.preventDefault();
 				editor.saveToFile();
+				return;
+			}
+			if (key === "a") {
+				event.preventDefault();
+				editor.selectAll();
 				return;
 			}
 			return;

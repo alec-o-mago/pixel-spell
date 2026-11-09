@@ -39,6 +39,7 @@
 				{ label: "Previous frame", keys: "[" },
 				{ label: "Next frame", keys: "]" },
 				{ label: "Toggle grid", keys: "⇧ G" },
+				{ label: "Select all", keys: "Ctrl A" },
 				{ label: "Delete selection", keys: "Delete" },
 			],
 		},

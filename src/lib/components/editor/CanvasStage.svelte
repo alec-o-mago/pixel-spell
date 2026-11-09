@@ -282,6 +282,19 @@
 		if (point) editor.lastCursor = point;
 	}
 
+	function blurActiveInput(): void {
+		const active = document.activeElement;
+		if (!(active instanceof HTMLElement)) return;
+		if (
+			active.tagName === "INPUT" ||
+			active.tagName === "TEXTAREA" ||
+			active.tagName === "SELECT" ||
+			active.isContentEditable
+		) {
+			active.blur();
+		}
+	}
+
 	function isPointSelected(point: Point | null): boolean {
 		return (
 			!!point && isSelectionPoint(editor.selection, editor.doc.width, point)
@@ -1072,6 +1085,7 @@
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
+		blurActiveInput();
 		const tool = editor.tool;
 
 		if (event.button === 1) {
@@ -1448,6 +1462,7 @@
 
 	function handleStagePointerDown(event: PointerEvent): void {
 		if (event.button !== 0 || event.target === canvas) return;
+		blurActiveInput();
 
 		const mirror = mirrorAtEvent(event);
 		if (!mirror) return;

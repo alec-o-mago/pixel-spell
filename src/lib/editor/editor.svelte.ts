@@ -239,6 +239,12 @@ export class EditorState {
 		this.selectionRevision++;
 	}
 
+	selectAll(): void {
+		const mask = new Uint8Array(this.doc.width * this.doc.height);
+		mask.fill(1);
+		this.setSelection(mask);
+	}
+
 	toggleMirror(kind: MirrorKind): void {
 		if (kind === "x") {
 			this.mirrorX = !this.mirrorX;

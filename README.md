@@ -79,6 +79,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
 | Toggle pixel grid   | `Shift+G`                |
+| Select all          | `Ctrl+A`                 |
 | Delete selection    | `Delete`                 |
 | Deselect            | `Esc`                    |
 | Resize timeline     | Drag divider, or `↑` / `↓` |
