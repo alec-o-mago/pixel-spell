@@ -14,7 +14,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Mirroring** — X, Y, and two diagonal axis mirrors. X mirrors across the horizontal axis and Y across the vertical axis. Active axes are drawn as dashed blue lines across the whole canvas stage and can be dragged from anywhere on the stage; drag a line in half-pixel steps to move its mirror axis. Turning a mirror off resets its guide to the center. The toggles live in the top bar next to the theme switch.
 - **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
-- **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, hex input, and a 32-color palette you can extend. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them.
+- **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, and hex input. The color panel supports multiple palettes: the built-in 32-color palette is read-only, while custom palettes can be created, renamed, deleted, and hold up to 256 colors. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them. Custom palettes are persisted in `localStorage`.
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
 - **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
@@ -104,7 +104,7 @@ src/
         ├── render.ts           # Canvas and thumbnail rendering helpers
         ├── color.ts            # Packed RGBA and hex color utilities
         ├── file.ts             # PNG export and project serialization
-        ├── palette.ts          # Default palette
+        ├── palette.ts          # Default palette and palette persistence
         └── tools.ts            # Tool metadata and shortcuts
 ```
 
@@ -122,7 +122,7 @@ Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written 
 
 Project files store each cel as a base64 string, so they are portable between browsers and easy to inspect.
 
-Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, undo history, and dirty state. Tool, color, palette, theme, and timeline-height settings are shared across the workspace.
+Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, undo history, and dirty state. Tool, color, palette collection, theme, and timeline-height settings are shared across the workspace.
 
 ## Notes and limitations
 
@@ -130,6 +130,7 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
 - **File → New sprite** and **File → Open project** create new tabs; **File → Save project** saves the active project.
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
+- Custom color palettes and the active palette selection are saved in `localStorage`; the built-in palette is recreated on load and cannot be edited.
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no selection or move tool yet.
 - The editor does not auto-save. Use **File → Save project** to keep your work.

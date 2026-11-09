@@ -45,7 +45,7 @@ Key files:
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | PNG/sprite-sheet export, project save/parse |
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
-| `lib/editor/palette.ts` | Default 32-color palette |
+| `lib/editor/palette.ts` | Built-in palette, palette type, and localStorage persistence |
 | `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
 | `lib/components/editor/Preview.svelte` | Closed scan-eye button and 1× floating frame preview |
 | `lib/components/editor/CanvasStage.svelte` | Canvas viewport, drawing pointer handling, mirror guides, zoom pill |
@@ -72,7 +72,7 @@ Key files:
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
 - `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
-- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, preview visibility, and timeline height are workspace-wide.
+- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
 - **File → New sprite** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
@@ -157,7 +157,7 @@ Preserve these regions and their relative placement when making changes.
 ## Persistence and files
 
 - Project format identifier: `"pixel-spell"`, version `1`.
-- `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user.
+- `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
 - Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
 - Opening a project file creates a new tab; saving applies to the active project only.
 - PNG export uses `canvas.toDataURL`; sprite sheets place frames horizontally.
@@ -176,6 +176,7 @@ Preserve these regions and their relative placement when making changes.
 - The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center and translated by `editor.panX`/`editor.panY`, so panning works at every zoom level. Pointer coordinates still come from the canvas `getBoundingClientRect`, so the transform does not affect drawing. Middle-mouse drag pans regardless of the active tool. Pan is clamped so at least one sprite pixel stays visible, and a resize that invalidates the pan recenters the view. Zooming moves the view halfway from the current center toward the pointer. Mirror guides are drawn on a stage-sized overlay and can be dragged from anywhere on the stage, not just the canvas.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
+- Custom palettes are workspace preferences stored in `localStorage` under `pixel-spell-palettes`; the built-in palette always has id `default` and is never persisted or editable. Custom palettes are capped at 256 colors and new ones start empty.
 - Layer visibility/opacity are document-wide. Per-frame visibility would require a model change and UI work.
 
 ## Definition of done

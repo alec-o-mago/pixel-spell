@@ -1,7 +1,10 @@
 <script lang="ts">
 	import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
 	import PaletteIcon from "@lucide/svelte/icons/palette";
+	import Pencil from "@lucide/svelte/icons/pencil";
 	import Plus from "@lucide/svelte/icons/plus";
+	import Trash2 from "@lucide/svelte/icons/trash-2";
+	import X from "@lucide/svelte/icons/x";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
 	import {
@@ -13,6 +16,7 @@
 		rgbToHsv,
 	} from "$lib/editor/color.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
+	import { MAX_PALETTE_COLORS } from "$lib/editor/palette.js";
 	import type { ColorSlot } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 
@@ -148,6 +152,68 @@
 		editor.setColorAlpha(target, 255);
 		editor.activeColorSlot = target;
 	}
+
+	let activePalette = $derived(editor.activePalette);
+	let paletteEditable = $derived(!activePalette.builtin);
+	let paletteColorCount = $derived(activePalette.colors.length);
+	let currentPaletteColor = $derived(
+		slot === "secondary" ? editor.secondaryColor : editor.primaryColor,
+	);
+	let canAddPaletteColor = $derived(
+		paletteEditable &&
+			paletteColorCount < MAX_PALETTE_COLORS &&
+			!activePalette.colors.includes(currentPaletteColor),
+	);
+	let addPaletteColorTitle = $derived(
+		!paletteEditable
+			? "The default palette cannot be modified"
+			: paletteColorCount >= MAX_PALETTE_COLORS
+				? `Palette is full (${MAX_PALETTE_COLORS} colors)`
+				: activePalette.colors.includes(currentPaletteColor)
+					? "Color is already in the palette"
+					: "Add current color to palette",
+	);
+
+	let renamingPalette = $state(false);
+	let renameDraft = $state("");
+	let renameInput = $state<HTMLInputElement | null>(null);
+
+	$effect(() => {
+		if (!renamingPalette || !renameInput) return;
+		renameInput.focus();
+		renameInput.select();
+	});
+
+	function onPaletteSelect(event: Event): void {
+		editor.selectPalette((event.currentTarget as HTMLSelectElement).value);
+	}
+
+	function startPaletteRename(): void {
+		if (!paletteEditable) return;
+		renameDraft = activePalette.name;
+		renamingPalette = true;
+	}
+
+	function createPalette(): void {
+		editor.createPalette();
+		startPaletteRename();
+	}
+
+	function commitPaletteRename(): void {
+		if (!renamingPalette) return;
+		renamingPalette = false;
+		editor.renamePalette(activePalette.id, renameDraft);
+	}
+
+	function cancelPaletteRename(): void {
+		renamingPalette = false;
+	}
+
+	function deletePalette(): void {
+		if (!paletteEditable) return;
+		renamingPalette = false;
+		editor.deletePalette(activePalette.id);
+	}
 </script>
 
 <section class="shrink-0 border-t">
@@ -161,7 +227,7 @@
 		</span>
 	</header>
 
-	<div class="space-y-3.5 p-4">
+	<div class="space-y-4 p-4">
 		<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-1.5">
 			<button
 				type="button"
@@ -235,7 +301,7 @@
 				aria-valuemax={100}
 				aria-valuenow={Math.round(value * 100)}
 				aria-valuetext={`Saturation ${Math.round(saturation * 100)}%, brightness ${Math.round(value * 100)}%`}
-				class="relative h-28 w-full touch-none overflow-hidden rounded-lg ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class="relative h-32 w-full touch-none overflow-hidden rounded-lg ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				onpointerdown={onSvPointerDown}
 				onpointermove={onSvPointerMove}
 				onpointerup={onSvPointerUp}
@@ -305,48 +371,145 @@
 			</span>
 		</div>
 
-		<div class="flex items-center justify-between pt-1">
-			<span class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-				Palette
-			</span>
-			<Button
-				variant="ghost"
-				size="icon-xs"
-				class="text-muted-foreground"
-				onclick={() => editor.addPaletteColor()}
-				title="Add current color to palette"
-				aria-label="Add current color to palette"
-			>
-				<Plus class="size-3.5" />
-			</Button>
-		</div>
+		<div class="space-y-2 pt-1">
+			<div class="flex items-center justify-between">
+				<span class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+					Palette
+				</span>
+				<div class="flex items-center gap-0.5">
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground"
+						onclick={() => editor.addPaletteColor()}
+						disabled={!canAddPaletteColor}
+						title={addPaletteColorTitle}
+						aria-label="Add current color to palette"
+					>
+						<Plus class="size-3.5" />
+					</Button>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground"
+						onclick={createPalette}
+						title="New palette"
+						aria-label="New palette"
+					>
+						<PaletteIcon class="size-3.5" />
+					</Button>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground"
+						onclick={startPaletteRename}
+						disabled={!paletteEditable}
+						title={paletteEditable ? "Rename palette" : "The default palette cannot be renamed"}
+						aria-label="Rename palette"
+					>
+						<Pencil class="size-3.5" />
+					</Button>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground"
+						onclick={deletePalette}
+						disabled={!paletteEditable}
+						title={paletteEditable ? "Delete palette" : "The default palette cannot be deleted"}
+						aria-label="Delete palette"
+					>
+						<Trash2 class="size-3.5" />
+					</Button>
+				</div>
+			</div>
 
-		<div class="grid grid-cols-8 gap-1.5">
-			{#each editor.palette as color (color)}
-				<button
-					type="button"
-					class="relative aspect-square rounded-[5px] ring-1 ring-black/10 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-					style={`background-color: ${color}`}
-					title={`${color} — left click: primary, right click: secondary`}
-					aria-label={`Use color ${color}`}
-					onclick={() => choosePaletteColor(color, "primary")}
-					oncontextmenu={(event) => {
-						event.preventDefault();
-						choosePaletteColor(color, "secondary");
-					}}
+			<div class="flex items-center gap-1.5">
+				{#if renamingPalette}
+					<input
+						bind:this={renameInput}
+						bind:value={renameDraft}
+						type="text"
+						class="h-7 min-w-0 flex-1 rounded-lg border bg-transparent px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+						maxlength={40}
+						onblur={commitPaletteRename}
+						onkeydown={(event) => {
+							if (event.key === "Enter") event.currentTarget.blur();
+							else if (event.key === "Escape") {
+								event.preventDefault();
+								cancelPaletteRename();
+							}
+						}}
+						aria-label="Palette name"
+					/>
+				{:else}
+					<select
+						class="h-7 min-w-0 flex-1 cursor-pointer rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+						value={editor.activePaletteId}
+						onchange={onPaletteSelect}
+						aria-label="Active palette"
+					>
+						{#each editor.palettes as palette (palette.id)}
+							<option value={palette.id}>{palette.name}</option>
+						{/each}
+					</select>
+				{/if}
+				<span
+					class="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground"
 				>
-					{#if editor.primaryColor === color && editor.alpha === 255}
-						<span
-							class="pointer-events-none absolute left-0.5 top-0.5 size-1.5 rounded-full bg-background ring-1 ring-foreground"
-						></span>
-					{/if}
-					{#if editor.secondaryColor === color && editor.secondaryAlpha === 255}
-						<span
-							class="pointer-events-none absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-background ring-1 ring-foreground"
-						></span>
-					{/if}
-				</button>
-			{/each}
+					{paletteColorCount}/{MAX_PALETTE_COLORS}
+				</span>
+			</div>
+
+			<div class="max-h-44 overflow-y-auto pr-1">
+				{#if paletteColorCount === 0}
+					<p
+						class="rounded-md border border-dashed px-2 py-3 text-center text-[10px] text-muted-foreground"
+					>
+						No colors yet. Use + to add the current color.
+					</p>
+				{:else}
+					<div class="grid grid-cols-8 gap-1.5">
+						{#each activePalette.colors as color, index (color)}
+							<div class="group relative aspect-square">
+								<button
+									type="button"
+									class="relative size-full rounded-[5px] ring-1 ring-black/10 transition-transform group-hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+									style={`background-color: ${color}`}
+									title={`${color} — left click: primary, right click: secondary`}
+									aria-label={`Use color ${color}`}
+									onclick={() => choosePaletteColor(color, "primary")}
+									oncontextmenu={(event) => {
+										event.preventDefault();
+										choosePaletteColor(color, "secondary");
+									}}
+								>
+									{#if editor.primaryColor === color && editor.alpha === 255}
+										<span
+											class="pointer-events-none absolute left-0.5 top-0.5 size-1.5 rounded-full bg-background ring-1 ring-foreground"
+										></span>
+									{/if}
+									{#if editor.secondaryColor === color && editor.secondaryAlpha === 255}
+										<span
+											class="pointer-events-none absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-background ring-1 ring-foreground"
+										></span>
+									{/if}
+								</button>
+								{#if paletteEditable}
+									<button
+										type="button"
+										class="absolute right-0.5 top-0.5 grid size-3.5 place-items-center rounded-full bg-background/90 text-muted-foreground opacity-0 ring-1 ring-border transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground focus-visible:pointer-events-auto focus-visible:opacity-100"
+										onclick={() => editor.removePaletteColor(index)}
+										title={`Remove ${color} from palette`}
+										aria-label={`Remove ${color} from palette`}
+									>
+										<X class="size-2.5" />
+									</button>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
 		</div>
 	</div>
 </section>

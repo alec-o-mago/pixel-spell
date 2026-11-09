@@ -1,7 +1,14 @@
 import { normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
 import { saveProjectFile, type LoadedProject } from "./file.js";
-import { DEFAULT_PALETTE } from "./palette.js";
+import {
+	DEFAULT_PALETTE_ID,
+	MAX_PALETTE_COLORS,
+	createDefaultPalette,
+	loadPaletteState,
+	savePaletteState,
+	type Palette,
+} from "./palette.js";
 import type {
 	ColorSlot,
 	Layer,
@@ -55,7 +62,8 @@ export class EditorState {
 	secondaryAlpha = $state(255);
 	/** Which color slot the color panel is currently editing. */
 	activeColorSlot = $state<ColorSlot>("primary");
-	palette = $state<string[]>([...DEFAULT_PALETTE]);
+	palettes = $state<Palette[]>([createDefaultPalette()]);
+	activePaletteId = $state<string>(DEFAULT_PALETTE_ID);
 
 	brushSize = $state(1);
 	sprayRadius = $state(6);
@@ -136,12 +144,23 @@ export class EditorState {
 			undo: [],
 			redo: [],
 		});
+
+		const paletteState = loadPaletteState();
+		this.palettes = paletteState.palettes;
+		this.activePaletteId = paletteState.activeId;
 	}
 
 	get activeLayer(): Layer {
 		return (
 			this.doc.layers.find((layer) => layer.id === this.activeLayerId) ??
 			this.doc.layers[this.doc.layers.length - 1]!
+		);
+	}
+
+	get activePalette(): Palette {
+		return (
+			this.palettes.find((palette) => palette.id === this.activePaletteId) ??
+			this.palettes[0]!
 		);
 	}
 
@@ -319,11 +338,76 @@ export class EditorState {
 		this.secondaryAlpha = primaryAlpha;
 	}
 
+	#persistPalettes(): void {
+		savePaletteState(this.palettes, this.activePaletteId);
+	}
+
+	#nextPaletteName(): string {
+		const names = new Set(this.palettes.map((palette) => palette.name.toLowerCase()));
+		let index = 1;
+		while (names.has(`palette ${index}`)) index++;
+		return `Palette ${index}`;
+	}
+
+	selectPalette(id: string): void {
+		if (!this.palettes.some((palette) => palette.id === id)) return;
+		if (this.activePaletteId === id) return;
+		this.activePaletteId = id;
+		this.#persistPalettes();
+	}
+
+	createPalette(): string {
+		const palette: Palette = {
+			id: uid("palette"),
+			name: this.#nextPaletteName(),
+			colors: [],
+		};
+		this.palettes.push(palette);
+		this.activePaletteId = palette.id;
+		this.#persistPalettes();
+		return palette.id;
+	}
+
+	deletePalette(id: string): void {
+		const index = this.palettes.findIndex((palette) => palette.id === id);
+		if (index < 0) return;
+		const palette = this.palettes[index]!;
+		if (palette.builtin) return;
+
+		this.palettes.splice(index, 1);
+		if (this.activePaletteId === id) {
+			this.activePaletteId = DEFAULT_PALETTE_ID;
+		}
+		this.#persistPalettes();
+	}
+
+	renamePalette(id: string, name: string): void {
+		const palette = this.palettes.find((item) => item.id === id);
+		if (!palette || palette.builtin) return;
+		const trimmed = name.trim();
+		if (!trimmed) return;
+		palette.name = trimmed.slice(0, 40);
+		this.#persistPalettes();
+	}
+
 	addPaletteColor(slot: ColorSlot = this.activeColorSlot): void {
+		const palette = this.activePalette;
+		if (palette.builtin) return;
+
 		const color = slot === "secondary" ? this.secondaryColor : this.primaryColor;
-		if (this.palette.includes(color)) return;
-		const next = [...this.palette, color];
-		this.palette = next.slice(-64);
+		if (palette.colors.includes(color)) return;
+		if (palette.colors.length >= MAX_PALETTE_COLORS) return;
+
+		palette.colors.push(color);
+		this.#persistPalettes();
+	}
+
+	removePaletteColor(index: number): void {
+		const palette = this.activePalette;
+		if (palette.builtin) return;
+		if (index < 0 || index >= palette.colors.length) return;
+		palette.colors.splice(index, 1);
+		this.#persistPalettes();
 	}
 
 	toggleTheme(): void {
@@ -541,7 +625,6 @@ export class EditorState {
 			redo: [],
 		});
 		this.projects.push({ id, name, dirty: false, modified: true });
-		if (project.palette?.length) this.palette = [...project.palette];
 		this.#activateProject(id);
 	}
 
@@ -554,7 +637,7 @@ export class EditorState {
 	saveToFile(): void {
 		saveProjectFile(
 			this.doc,
-			this.palette,
+			this.activePalette.colors,
 			this.name,
 			this.activeFrame,
 			this.activeLayerId,
