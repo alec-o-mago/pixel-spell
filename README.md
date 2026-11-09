@@ -134,4 +134,4 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no selection or move tool yet.
 - The editor does not auto-save. Use **File → Save project** to keep your work.
-- The default canvas is 32 × 32; new sprites can be 1–256 px in each dimension.
+- The default canvas is 32 × 32; new sprites can be 1–1024 px in each dimension.

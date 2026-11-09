@@ -23,7 +23,7 @@ import type {
 
 const HISTORY_LIMIT = 80;
 const MIN_SIZE = 1;
-const MAX_SIZE = 256;
+const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
 

@@ -59,7 +59,7 @@
 						id="new-width"
 						type="number"
 						min={1}
-						max={256}
+						max={1024}
 						bind:value={width}
 						class="tabular-nums"
 					/>
@@ -70,7 +70,7 @@
 						id="new-height"
 						type="number"
 						min={1}
-						max={256}
+						max={1024}
 						bind:value={height}
 						class="tabular-nums"
 					/>
@@ -78,7 +78,7 @@
 			</div>
 
 			<p class="text-xs text-muted-foreground">
-				Canvas size can be between 1 and 256 pixels. This opens a new project tab and
+				Canvas size can be between 1 and 1024 pixels. This opens a new project tab and
 				keeps the current project open.
 			</p>
 		</div>

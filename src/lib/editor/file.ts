@@ -168,8 +168,8 @@ export function parseProject(raw: string): LoadedProject | null {
 		const data = JSON.parse(raw) as Partial<SerializedProject>;
 		if (data.format !== "pixel-spell" || !Array.isArray(data.layers)) return null;
 
-		const width = clamp(Math.round(Number(data.width) || 0), 1, 256);
-		const height = clamp(Math.round(Number(data.height) || 0), 1, 256);
+		const width = clamp(Math.round(Number(data.width) || 0), 1, 1024);
+		const height = clamp(Math.round(Number(data.height) || 0), 1, 1024);
 		const frameCount = clamp(Math.round(Number(data.frameCount) || 1), 1, 120);
 		const fps = clamp(Math.round(Number(data.fps) || 12), 1, 60);
 		const pixelCount = width * height;
