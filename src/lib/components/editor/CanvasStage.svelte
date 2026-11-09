@@ -1465,11 +1465,14 @@
 		blurActiveInput();
 
 		const mirror = mirrorAtEvent(event);
-		if (!mirror) return;
+		if (mirror) {
+			event.preventDefault();
+			draggingMirror = mirror.kind;
+			capturePointer(event, stage);
+			return;
+		}
 
-		event.preventDefault();
-		draggingMirror = mirror.kind;
-		capturePointer(event, stage);
+		if (isSelectionTool(editor.tool)) editor.clearSelection();
 	}
 
 	function handleStagePointerMove(event: PointerEvent): void {
