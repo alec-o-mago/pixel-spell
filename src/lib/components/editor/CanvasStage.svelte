@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { tick } from "svelte";
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
 	import ZoomIn from "@lucide/svelte/icons/zoom-in";
@@ -37,6 +36,7 @@
 
 	let stage: HTMLDivElement | undefined;
 	let canvas: HTMLCanvasElement | undefined;
+	let mirrorCanvas: HTMLCanvasElement | undefined;
 
 	let drawing = false;
 	let start: Point | null = null;
@@ -62,7 +62,8 @@
 	let curveHistoryPushed = false;
 
 	let panning = $state(false);
-	let panOrigin = { x: 0, y: 0, scrollLeft: 0, scrollTop: 0 };
+	let panOrigin = { x: 0, y: 0, panX: 0, panY: 0 };
+	let wheelAccumulator = 0;
 
 	let selecting = false;
 	let selectStart: Point | null = null;
@@ -116,7 +117,8 @@
 	);
 
 	let showBrushCursor = $derived(
-		!draggingMirror &&
+		!panning &&
+			!draggingMirror &&
 			!hoveringMirror &&
 			editor.tool !== "pan" &&
 			editor.tool !== "zoom" &&
@@ -128,23 +130,35 @@
 			? mirrorCursor(draggingMirror)
 			: hoveringMirror
 				? mirrorCursor(hoveringMirror)
-				: editor.tool === "pan"
-					? panning
-						? "cursor-grabbing"
-						: "cursor-grab"
-					: editor.tool === "zoom"
-						? "cursor-zoom-in"
-						: isSelectionTool(editor.tool)
-							? hoveringSelection
-								? "cursor-move"
-								: "cursor-crosshair"
-							: !isDrawable
-								? "cursor-not-allowed"
-								: editor.tool === "eyedropper"
-									? "cursor-copy"
-									: editor.tool === "fill"
-										? "cursor-cell"
-										: "cursor-crosshair",
+				: panning
+					? "cursor-grabbing"
+					: editor.tool === "pan"
+						? "cursor-grab"
+						: editor.tool === "zoom"
+							? "cursor-zoom-in"
+							: isSelectionTool(editor.tool)
+								? hoveringSelection
+									? "cursor-move"
+									: "cursor-crosshair"
+								: !isDrawable
+									? "cursor-not-allowed"
+									: editor.tool === "eyedropper"
+										? "cursor-copy"
+										: editor.tool === "fill"
+											? "cursor-cell"
+											: "cursor-crosshair",
+	);
+
+	let stageCursor = $derived(
+		draggingMirror
+			? mirrorCursor(draggingMirror)
+			: hoveringMirror
+				? mirrorCursor(hoveringMirror)
+				: panning
+					? "cursor-grabbing"
+					: editor.tool === "pan"
+						? "cursor-grab"
+						: "",
 	);
 
 	$effect(() => {
@@ -167,7 +181,6 @@
 		const selection = editor.selection;
 		const lasso = lassoPoints;
 		const hover = lassoHover;
-		const mirrors = editor.mirrorAxes;
 
 		if (!canvas) return;
 		const pixels = compositeFrame(doc, frame);
@@ -181,7 +194,33 @@
 		);
 		const context = canvas.getContext("2d");
 		if (context) {
-			drawOverlay(context, selection, lasso, hover, mirrors, doc.width, doc.height);
+			drawOverlay(context, selection, lasso, hover, doc.width, doc.height);
+		}
+	});
+
+	$effect(() => {
+		editor.revision;
+		editor.viewport;
+		editor.panX;
+		editor.panY;
+		zoom;
+		canvasWidth;
+		canvasHeight;
+		drawMirrorOverlay();
+	});
+
+	$effect(() => {
+		const bounds = panBounds();
+		if (!bounds) return;
+		if (
+			editor.panX < bounds.minX ||
+			editor.panX > bounds.maxX ||
+			editor.panY < bounds.minY ||
+			editor.panY > bounds.maxY
+		) {
+			// A resize or document change left the canvas off stage; recenter it.
+			editor.panX = 0;
+			editor.panY = 0;
 		}
 	});
 
@@ -251,18 +290,19 @@
 	}
 
 	function mirrorAtEvent(event: PointerEvent): MirrorAxis | null {
-		if (!canvas) return null;
+		if (!stage || !canvas) return null;
+
+		const stageRect = stage.getBoundingClientRect();
 		const rect = canvas.getBoundingClientRect();
+		if (stageRect.width === 0 || stageRect.height === 0) return null;
 		if (rect.width === 0 || rect.height === 0) return null;
 
 		const width = editor.doc.width;
 		const height = editor.doc.height;
-		const boundaryX = ((event.clientX - rect.left) / rect.width) * width;
-		const boundaryY = ((event.clientY - rect.top) / rect.height) * height;
-		if (boundaryX < 0 || boundaryX > width || boundaryY < 0 || boundaryY > height) {
-			return null;
-		}
-
+		const pointerX = event.clientX - stageRect.left;
+		const pointerY = event.clientY - stageRect.top;
+		const left = rect.left - stageRect.left;
+		const top = rect.top - stageRect.top;
 		const zoomX = rect.width / width;
 		const zoomY = rect.height / height;
 		let best: MirrorAxis | null = null;
@@ -271,15 +311,15 @@
 		for (const axis of editor.mirrorAxes) {
 			let distance: number;
 			if (axis.kind === "x") {
-				distance = Math.abs(boundaryY - axis.position) * zoomY;
+				distance = Math.abs(pointerY - (top + axis.position * zoomY));
 			} else if (axis.kind === "y") {
-				distance = Math.abs(boundaryX - axis.position) * zoomX;
+				distance = Math.abs(pointerX - (left + axis.position * zoomX));
 			} else if (axis.kind === "diagonal-down") {
-				distance =
-					(Math.abs(boundaryY - boundaryX - axis.position) / Math.SQRT2) * zoomX;
+				const offset = top - left + axis.position * zoomX;
+				distance = Math.abs(pointerY - pointerX - offset) / Math.SQRT2;
 			} else {
-				distance =
-					(Math.abs(boundaryX + boundaryY - axis.position) / Math.SQRT2) * zoomX;
+				const offset = left + top + axis.position * zoomX;
+				distance = Math.abs(pointerX + pointerY - offset) / Math.SQRT2;
 			}
 
 			if (distance < bestDistance) {
@@ -627,35 +667,87 @@
 		panOrigin = {
 			x: event.clientX,
 			y: event.clientY,
-			scrollLeft: stage?.scrollLeft ?? 0,
-			scrollTop: stage?.scrollTop ?? 0,
+			panX: editor.panX,
+			panY: editor.panY,
 		};
 		capturePointer(event);
 	}
 
-	function updatePan(event: PointerEvent): void {
-		if (!stage) return;
-		stage.scrollLeft = panOrigin.scrollLeft - (event.clientX - panOrigin.x);
-		stage.scrollTop = panOrigin.scrollTop - (event.clientY - panOrigin.y);
+	function panBounds(): {
+		minX: number;
+		maxX: number;
+		minY: number;
+		maxY: number;
+	} | null {
+		const viewport = editor.viewport;
+		if (viewport.w <= 0 || viewport.h <= 0) return null;
+
+		const scale = editor.effectiveZoom;
+		const width = editor.doc.width * scale;
+		const height = editor.doc.height * scale;
+		// Keep at least one whole sprite pixel inside the stage on each axis.
+		const visibleX = Math.min(scale, width, viewport.w);
+		const visibleY = Math.min(scale, height, viewport.h);
+
+		return {
+			minX: visibleX - (viewport.w + width) / 2,
+			maxX: (viewport.w + width) / 2 - visibleX,
+			minY: visibleY - (viewport.h + height) / 2,
+			maxY: (viewport.h + height) / 2 - visibleY,
+		};
 	}
 
-	async function zoomAtPoint(event: PointerEvent, direction: 1 | -1): Promise<void> {
-		if (!canvas || !stage) return;
-		event.preventDefault();
+	function clampPan(): void {
+		const bounds = panBounds();
+		if (!bounds) return;
+		editor.panX = Math.max(bounds.minX, Math.min(bounds.maxX, editor.panX));
+		editor.panY = Math.max(bounds.minY, Math.min(bounds.maxY, editor.panY));
+	}
 
-		const rect = canvas.getBoundingClientRect();
+	function updatePan(event: PointerEvent): void {
+		editor.panX = panOrigin.panX + (event.clientX - panOrigin.x);
+		editor.panY = panOrigin.panY + (event.clientY - panOrigin.y);
+		clampPan();
+	}
+
+	function zoomAtPoint(
+		event: { clientX: number; clientY: number },
+		direction: 1 | -1,
+	): void {
+		if (!stage) return;
+
 		const oldZoom = editor.effectiveZoom;
-		const docX = (event.clientX - rect.left) / oldZoom;
-		const docY = (event.clientY - rect.top) / oldZoom;
 		const nextZoom = Math.max(1, Math.min(64, oldZoom + direction));
 		if (nextZoom === oldZoom) return;
 
-		editor.zoom = nextZoom;
-		await tick();
+		const stageRect = stage.getBoundingClientRect();
+		if (stageRect.width === 0 || stageRect.height === 0) return;
 
-		const nextRect = canvas.getBoundingClientRect();
-		stage.scrollLeft += nextRect.left + docX * nextZoom - event.clientX;
-		stage.scrollTop += nextRect.top + docY * nextZoom - event.clientY;
+		// Move the view to the midpoint between the pointer and the current center.
+		const stageCenterX = stageRect.left + stageRect.width / 2;
+		const stageCenterY = stageRect.top + stageRect.height / 2;
+		editor.panX = (editor.panX + (event.clientX - stageCenterX)) / 2;
+		editor.panY = (editor.panY + (event.clientY - stageCenterY)) / 2;
+		editor.zoom = nextZoom;
+		clampPan();
+	}
+
+	function handleWheel(event: WheelEvent): void {
+		if (event.deltaY === 0) return;
+		event.preventDefault();
+
+		const scale =
+			event.deltaMode === WheelEvent.DOM_DELTA_LINE
+				? 16
+				: event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+					? 400
+					: 1;
+		wheelAccumulator += event.deltaY * scale;
+		if (Math.abs(wheelAccumulator) < 40) return;
+
+		const direction: 1 | -1 = wheelAccumulator < 0 ? 1 : -1;
+		wheelAccumulator = 0;
+		zoomAtPoint(event, direction);
 	}
 
 	function updateRectSelection(point: Point): void {
@@ -799,17 +891,23 @@
 		moveApplied = false;
 	}
 
-	function capturePointer(event: PointerEvent): void {
+	function capturePointer(
+		event: PointerEvent,
+		target: HTMLElement | undefined = canvas,
+	): void {
 		try {
-			canvas?.setPointerCapture(event.pointerId);
+			target?.setPointerCapture(event.pointerId);
 		} catch {
 			// Synthetic pointer events may not own a capture target.
 		}
 	}
 
-	function releasePointer(event: PointerEvent): void {
-		if (canvas?.hasPointerCapture(event.pointerId)) {
-			canvas.releasePointerCapture(event.pointerId);
+	function releasePointer(
+		event: PointerEvent,
+		target: HTMLElement | undefined = canvas,
+	): void {
+		if (target?.hasPointerCapture(event.pointerId)) {
+			target.releasePointerCapture(event.pointerId);
 		}
 	}
 
@@ -818,7 +916,6 @@
 		selection: Uint8Array | null,
 		lasso: Point[],
 		hover: Point | null,
-		mirrors: MirrorAxis[],
 		docWidth: number,
 		docHeight: number,
 	): void {
@@ -904,57 +1001,81 @@
 			context.stroke();
 		}
 
-		if (mirrors.length > 0) {
-			context.beginPath();
-			for (const axis of mirrors) {
-				let x0 = 0;
-				let y0 = 0;
-				let x1 = 0;
-				let y1 = 0;
+		context.restore();
+	}
 
-				if (axis.kind === "x") {
-					y0 = axis.position;
-					y1 = axis.position;
-					x0 = 0;
-					x1 = docWidth;
-				} else if (axis.kind === "y") {
-					x0 = axis.position;
-					x1 = axis.position;
-					y0 = 0;
-					y1 = docHeight;
-				} else if (axis.kind === "diagonal-down") {
-					const startX = Math.max(0, -axis.position);
-					const endX = Math.min(docWidth, docHeight - axis.position);
-					if (endX < startX) continue;
-					x0 = startX;
-					y0 = startX + axis.position;
-					x1 = endX;
-					y1 = endX + axis.position;
-				} else {
-					const startX = Math.max(0, axis.position - docHeight);
-					const endX = Math.min(docWidth, axis.position);
-					if (endX < startX) continue;
-					x0 = startX;
-					y0 = axis.position - startX;
-					x1 = endX;
-					y1 = axis.position - endX;
-				}
+	/** Draw mirror guides across the whole stage, not just over the sprite. */
+	function drawMirrorOverlay(): void {
+		if (!mirrorCanvas || !stage || !canvas) return;
 
-				context.moveTo(x0 * scaleX, y0 * scaleY);
-				context.lineTo(x1 * scaleX, y1 * scaleY);
-			}
-			context.lineWidth = Math.max(1.5, dpr * 1.5);
-			context.setLineDash([6 * dpr, 4 * dpr]);
-			context.strokeStyle = "rgba(14, 165, 233, 0.95)";
-			context.stroke();
-			context.setLineDash([]);
+		const stageRect = stage.getBoundingClientRect();
+		const width = Math.max(1, Math.round(stageRect.width));
+		const height = Math.max(1, Math.round(stageRect.height));
+		const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+		const bufferWidth = Math.round(width * dpr);
+		const bufferHeight = Math.round(height * dpr);
+
+		if (mirrorCanvas.width !== bufferWidth || mirrorCanvas.height !== bufferHeight) {
+			mirrorCanvas.width = bufferWidth;
+			mirrorCanvas.height = bufferHeight;
 		}
 
-		context.restore();
+		const context = mirrorCanvas.getContext("2d");
+		if (!context) return;
+
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, bufferWidth, bufferHeight);
+
+		const axes = editor.mirrorAxes;
+		if (axes.length === 0) return;
+
+		const rect = canvas.getBoundingClientRect();
+		const left = rect.left - stageRect.left;
+		const top = rect.top - stageRect.top;
+		const scale = rect.width / editor.doc.width;
+
+		context.setTransform(dpr, 0, 0, dpr, 0, 0);
+		context.beginPath();
+		for (const axis of axes) {
+			if (axis.kind === "x") {
+				const y = top + axis.position * scale;
+				context.moveTo(0, y);
+				context.lineTo(width, y);
+			} else if (axis.kind === "y") {
+				const x = left + axis.position * scale;
+				context.moveTo(x, 0);
+				context.lineTo(x, height);
+			} else if (axis.kind === "diagonal-down") {
+				// In document space y - x = position; translate that to stage space.
+				const offset = top - left + axis.position * scale;
+				context.moveTo(0, offset);
+				context.lineTo(width, width + offset);
+			} else {
+				// In document space x + y = position; translate that to stage space.
+				const offset = left + top + axis.position * scale;
+				context.moveTo(0, offset);
+				context.lineTo(width, offset - width);
+			}
+		}
+
+		context.lineWidth = 1.5;
+		context.setLineDash([6, 4]);
+		context.strokeStyle = "rgba(14, 165, 233, 0.95)";
+		context.stroke();
+		context.setLineDash([]);
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
 		const tool = editor.tool;
+
+		if (event.button === 1) {
+			event.preventDefault();
+			hoveringMirror = null;
+			if (!drawing && !movingSelection && !selecting && !lassoDragging) {
+				startPan(event);
+			}
+			return;
+		}
 
 		if (event.button === 0) {
 			const mirror = mirrorAtEvent(event);
@@ -976,7 +1097,7 @@
 
 		if (tool === "zoom") {
 			if (event.button !== 0 && event.button !== 2) return;
-			void zoomAtPoint(event, event.button === 0 ? 1 : -1);
+			zoomAtPoint(event, event.button === 0 ? 1 : -1);
 			return;
 		}
 
@@ -1319,63 +1440,115 @@
 		if (editor.tool === "lasso") lassoHover = null;
 	}
 
+	function handleStagePointerDown(event: PointerEvent): void {
+		if (event.button !== 0 || event.target === canvas) return;
+
+		const mirror = mirrorAtEvent(event);
+		if (!mirror) return;
+
+		event.preventDefault();
+		draggingMirror = mirror.kind;
+		capturePointer(event, stage);
+	}
+
+	function handleStagePointerMove(event: PointerEvent): void {
+		if (event.target === canvas) return;
+
+		if (draggingMirror) {
+			updateMirrorDrag(event);
+			return;
+		}
+
+		if (panning || movingSelection || selecting || lassoDragging || drawing) return;
+		hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
+	}
+
+	function handleStagePointerUp(event: PointerEvent): void {
+		if (event.target === canvas || !draggingMirror) return;
+		draggingMirror = null;
+		releasePointer(event, stage);
+	}
+
+	function handleStagePointerLeave(): void {
+		if (draggingMirror) return;
+		hoveringMirror = null;
+	}
+
 	function handleWindowKeydown(event: KeyboardEvent): void {
 		if (event.key === "Escape" && lassoPoints.length > 0) resetLasso();
 	}
 </script>
 
 <section class="relative min-h-0 flex-1 overflow-hidden bg-muted/20">
-	<div class="canvas-stage absolute inset-0 overflow-auto" bind:this={stage}>
-		<div class="flex min-h-full w-max min-w-full items-center justify-center p-8">
-			<div
-				class="relative shrink-0 shadow-xl ring-1 ring-border/70"
+	<div
+		class={cn("canvas-stage absolute inset-0 overflow-hidden", stageCursor)}
+		bind:this={stage}
+		role="presentation"
+		onwheel={handleWheel}
+		onpointerdown={handleStagePointerDown}
+		onpointermove={handleStagePointerMove}
+		onpointerup={handleStagePointerUp}
+		onpointercancel={handleStagePointerUp}
+		onpointerleave={handleStagePointerLeave}
+	>
+		<div
+			class="absolute left-1/2 top-1/2 shadow-xl ring-1 ring-border/70"
+			style:width={`${canvasWidth}px`}
+			style:height={`${canvasHeight}px`}
+			style:transform={`translate(calc(-50% + ${editor.panX}px), calc(-50% + ${editor.panY}px))`}
+		>
+			<div class="checkerboard checkerboard-lg absolute inset-0"></div>
+
+			<canvas
+				bind:this={canvas}
+				class={cn("relative block touch-none select-none", canvasCursor)}
 				style:width={`${canvasWidth}px`}
 				style:height={`${canvasHeight}px`}
-			>
-				<div class="checkerboard checkerboard-lg absolute inset-0"></div>
+				onpointerdown={handlePointerDown}
+				onpointermove={handlePointerMove}
+				onpointerup={handlePointerUp}
+				onpointercancel={handlePointerUp}
+				onpointerleave={handlePointerLeave}
+				onmousedown={(event) => {
+					if (event.button === 1) event.preventDefault();
+				}}
+				oncontextmenu={(event) => event.preventDefault()}
+				aria-label="Pixel art canvas"
+			></canvas>
 
-				<canvas
-					bind:this={canvas}
-					class={cn("relative block touch-none select-none", canvasCursor)}
-					style:width={`${canvasWidth}px`}
-					style:height={`${canvasHeight}px`}
-					onpointerdown={handlePointerDown}
-					onpointermove={handlePointerMove}
-					onpointerup={handlePointerUp}
-					onpointercancel={handlePointerUp}
-					onpointerleave={handlePointerLeave}
-					oncontextmenu={(event) => event.preventDefault()}
-					aria-label="Pixel art canvas"
-				></canvas>
+			{#if editor.showGrid && zoom >= 6}
+				<div
+					class="pointer-events-none absolute inset-0"
+					style={`background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: ${zoom}px ${zoom}px;`}
+				></div>
+			{/if}
 
-				{#if editor.showGrid && zoom >= 6}
+			{#if editor.cursor && isDrawable && showBrushCursor}
+				{#if areaToolRadius > 0}
 					<div
-						class="pointer-events-none absolute inset-0"
-						style={`background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: ${zoom}px ${zoom}px;`}
+						class="pointer-events-none absolute rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
+						style:left={`${(editor.cursor.x - areaToolRadius) * zoom}px`}
+						style:top={`${(editor.cursor.y - areaToolRadius) * zoom}px`}
+						style:width={`${(areaToolRadius * 2 + 1) * zoom}px`}
+						style:height={`${(areaToolRadius * 2 + 1) * zoom}px`}
+					></div>
+				{:else}
+					<div
+						class="pointer-events-none absolute border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
+						style:left={`${(editor.cursor.x - cursorOffset) * zoom}px`}
+						style:top={`${(editor.cursor.y - cursorOffset) * zoom}px`}
+						style:width={`${brushCursorSize * zoom}px`}
+						style:height={`${brushCursorSize * zoom}px`}
 					></div>
 				{/if}
-
-				{#if editor.cursor && isDrawable && showBrushCursor}
-					{#if areaToolRadius > 0}
-						<div
-							class="pointer-events-none absolute rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
-							style:left={`${(editor.cursor.x - areaToolRadius) * zoom}px`}
-							style:top={`${(editor.cursor.y - areaToolRadius) * zoom}px`}
-							style:width={`${(areaToolRadius * 2 + 1) * zoom}px`}
-							style:height={`${(areaToolRadius * 2 + 1) * zoom}px`}
-						></div>
-					{:else}
-						<div
-							class="pointer-events-none absolute border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.55)]"
-							style:left={`${(editor.cursor.x - cursorOffset) * zoom}px`}
-							style:top={`${(editor.cursor.y - cursorOffset) * zoom}px`}
-							style:width={`${brushCursorSize * zoom}px`}
-							style:height={`${brushCursorSize * zoom}px`}
-						></div>
-					{/if}
-				{/if}
-			</div>
+			{/if}
 		</div>
+
+		<canvas
+			bind:this={mirrorCanvas}
+			class="pointer-events-none absolute inset-0 h-full w-full"
+			aria-hidden="true"
+		></canvas>
 	</div>
 
 	<div class="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5">

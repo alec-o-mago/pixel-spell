@@ -36,6 +36,8 @@ interface ProjectSnapshot {
 	activeLayerId: string;
 	activeFrame: number;
 	zoom: number | null;
+	panX: number;
+	panY: number;
 	selection: Uint8Array | null;
 	undo: PixelDoc[];
 	redo: PixelDoc[];
@@ -84,6 +86,9 @@ export class EditorState {
 
 	showGrid = $state(true);
 	zoom = $state<number | null>(null);
+	/** Canvas center offset from the stage center, in screen pixels. */
+	panX = $state(0);
+	panY = $state(0);
 	viewport = $state<ViewportSize>({ w: 0, h: 0 });
 	playing = $state(false);
 	theme = $state<"light" | "dark">(readStoredTheme());
@@ -122,6 +127,8 @@ export class EditorState {
 			activeLayerId: this.activeLayerId,
 			activeFrame: this.activeFrame,
 			zoom: this.zoom,
+			panX: 0,
+			panY: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -324,6 +331,8 @@ export class EditorState {
 
 	fitToWindow(): void {
 		this.zoom = null;
+		this.panX = 0;
+		this.panY = 0;
 	}
 
 	touch(): void {
@@ -389,6 +398,8 @@ export class EditorState {
 		snapshot.activeLayerId = this.activeLayerId;
 		snapshot.activeFrame = this.activeFrame;
 		snapshot.zoom = this.zoom;
+		snapshot.panX = this.panX;
+		snapshot.panY = this.panY;
 		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
@@ -404,6 +415,8 @@ export class EditorState {
 		this.activeLayerId = snapshot.activeLayerId;
 		this.activeFrame = snapshot.activeFrame;
 		this.zoom = snapshot.zoom;
+		this.panX = snapshot.panX;
+		this.panY = snapshot.panY;
 		this.selection = snapshot.selection;
 		this.selectionRevision++;
 		this.name = tab.name;
@@ -487,6 +500,8 @@ export class EditorState {
 			activeLayerId: doc.layers[0].id,
 			activeFrame: 0,
 			zoom: null,
+			panX: 0,
+			panY: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -510,6 +525,8 @@ export class EditorState {
 			activeLayerId,
 			activeFrame,
 			zoom: null,
+			panX: 0,
+			panY: 0,
 			selection: null,
 			undo: [],
 			redo: [],

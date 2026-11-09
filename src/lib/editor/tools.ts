@@ -17,7 +17,7 @@ export const TOOLS: ToolDef[] = [
 	{
 		id: "zoom",
 		label: "Zoom",
-		description: "Left-click to zoom in, right-click to zoom out",
+		description: "Left-click to zoom in, right-click to zoom out; the view moves halfway toward the clicked point",
 		shortcut: "Z",
 	},
 	{

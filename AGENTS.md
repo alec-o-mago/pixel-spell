@@ -64,13 +64,13 @@ Key files:
 ## Projects and tabs
 
 - The workspace holds multiple projects. `editor.projects` is a `$state<ProjectTab[]>` of tab metadata (`id`, `name`, `dirty`, `modified`); `editor.activeProjectId` selects one.
-- The active project's live state lives in the top-level `editor` fields: `doc`, `activeLayerId`, `activeFrame`, `zoom`, `name`, `dirty`, `modified`, the undo/redo arrays, and counts.
-- Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame, zoom, undo/redo).
+- The active project's live state lives in the top-level `editor` fields: `doc`, `activeLayerId`, `activeFrame`, `zoom`, `panX`, `panY`, `name`, `dirty`, `modified`, the undo/redo arrays, and counts.
+- Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame, zoom, pan, undo/redo).
 - Before switching, creating, opening, or saving, `#syncActiveProject()` copies live state into the active tab/snapshot. `#activateProject(id)` loads a target snapshot and tab metadata into the live fields.
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
 - `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
-- Undo/redo, zoom, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, and timeline height are workspace-wide.
+- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
 - **File → New sprite** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
@@ -171,7 +171,7 @@ Preserve these regions and their relative placement when making changes.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
 - `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
-- The canvas scroll area uses `w-max` inside a centering flex container so oversized manual zoom levels remain reachable in both directions.
+- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center and translated by `editor.panX`/`editor.panY`, so panning works at every zoom level. Pointer coordinates still come from the canvas `getBoundingClientRect`, so the transform does not affect drawing. Middle-mouse drag pans regardless of the active tool. Pan is clamped so at least one sprite pixel stays visible, and a resize that invalidates the pan recenters the view. Zooming moves the view halfway from the current center toward the pointer. Mirror guides are drawn on a stage-sized overlay and can be dragged from anywhere on the stage, not just the canvas.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Layer visibility/opacity are document-wide. Per-frame visibility would require a model change and UI work.

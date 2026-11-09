@@ -6,20 +6,20 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 ## Features
 
-- **Drawing tools** — pencil, spray, eraser, line, curve, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
+- **Drawing tools** — pencil, spray, eraser, line, curve, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. Zooming with the tool or the scroll wheel moves the view halfway from the current center toward the pointer. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
 - **Area effects** — the blur and jumble tools soften or scramble pixels inside a round area as you pass over them, with adjustable radius and power.
 - **Selections** — magic wand (with optional diagonal connections), separate rectangle and ellipse marquee tools, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; hold `Shift` while making another selection to add it to the current one. Edits are clipped to the selected area, and `Delete` clears the selected pixels. Deselect with the panel button or `Esc`.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, layer-aware color sampling, and selection options. The top bar's alpha-lock toggle prevents painting over fully transparent pixels.
 - **Pixel perfect** — optional corner-pixel removal for smoother pencil, eraser, and curve strokes.
-- **Mirroring** — X, Y, and two diagonal axis mirrors. X mirrors across the horizontal axis and Y across the vertical axis. Active axes are drawn as dashed blue lines on the canvas; drag a line in half-pixel steps to move its mirror axis. Turning a mirror off resets its guide to the center. The toggles live in the top bar next to the theme switch.
+- **Mirroring** — X, Y, and two diagonal axis mirrors. X mirrors across the horizontal axis and Y across the vertical axis. Active axes are drawn as dashed blue lines across the whole canvas stage and can be dragged from anywhere on the stage; drag a line in half-pixel steps to move its mirror axis. Turning a mirror off resets its guide to the center. The toggles live in the top bar next to the theme switch.
 - **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, hex input, and a 32-color palette you can extend. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them.
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
-- **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
+- **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
 - **Projects** — save and open portable `.pixelspell.json` files; opened files get their own tab.
-- **Canvas controls** — fit-to-window or manual zoom, pixel grid, and a live cursor preview.
+- **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, pixel grid, and a live cursor preview.
 - **Light and dark themes** with a sky-blue accent, persisted in `localStorage`.
 
 ## Tech stack
@@ -120,7 +120,7 @@ Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written 
 
 Project files store each cel as a base64 string, so they are portable between browsers and easy to inspect.
 
-Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, undo history, and dirty state. Tool, color, palette, theme, and timeline-height settings are shared across the workspace.
+Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, undo history, and dirty state. Tool, color, palette, theme, and timeline-height settings are shared across the workspace.
 
 ## Notes and limitations
 
