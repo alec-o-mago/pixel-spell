@@ -18,7 +18,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
 - **Multiple projects** — open several projects in tabs above the canvas. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
-- **Projects** — save and open portable `.pixelspell.json` files; opened files get their own tab.
+- **Projects** — save and open portable `.pixelspell` files; opened files get their own tab.
 - **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, pixel grid, and a live cursor preview. A compact menu-bar readout shows the canvas size, last cursor coordinate, current frame, and active layer.
 - **Preview window** — a 1× copy of the active frame floats in the upper-right of the canvas stage. Close it to leave a circular scan-eye button; toggle it from **View → Show preview**. The preview updates while the animation plays.
 - **Light and dark themes** with a sky-blue accent, persisted in `localStorage`.

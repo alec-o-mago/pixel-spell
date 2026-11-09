@@ -156,7 +156,7 @@ Preserve these regions and their relative placement when making changes.
 
 ## Persistence and files
 
-- Project format identifier: `"pixel-spell"`, version `1`.
+- Project format identifier: `"pixel-spell"`, version `1`; project files use the `.pixelspell` extension with JSON content.
 - `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
 - Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
 - Opening a project file creates a new tab; saving applies to the active project only.

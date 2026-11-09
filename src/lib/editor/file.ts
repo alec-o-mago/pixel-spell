@@ -159,7 +159,7 @@ export function saveProjectFile(
 	const json = serializeProject(doc, palette, name, activeFrame, activeLayerId);
 	const blob = new Blob([json], { type: "application/json" });
 	const url = URL.createObjectURL(blob);
-	download(`${fileBase(name)}.pixelspell.json`, url);
+	download(`${fileBase(name)}.pixelspell`, url);
 	setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
