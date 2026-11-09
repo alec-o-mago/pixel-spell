@@ -85,6 +85,7 @@ export class EditorState {
 	selectionRevision = $state(0);
 
 	showGrid = $state(true);
+	showPreview = $state(false);
 	zoom = $state<number | null>(null);
 	/** Canvas center offset from the stage center, in screen pixels. */
 	panX = $state(0);
@@ -94,6 +95,8 @@ export class EditorState {
 	theme = $state<"light" | "dark">(readStoredTheme());
 
 	cursor = $state<Point | null>(null);
+	/** Last cursor position over the canvas, kept for the menu bar readout. */
+	lastCursor = $state<Point | null>(null);
 	revision = $state(0);
 	dirty = $state(false);
 	modified = $state(false);

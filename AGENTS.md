@@ -47,6 +47,8 @@ Key files:
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Default 32-color palette |
 | `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
+| `lib/components/editor/Preview.svelte` | Closed scan-eye button and 1× floating frame preview |
+| `lib/components/editor/CanvasStage.svelte` | Canvas viewport, drawing pointer handling, mirror guides, zoom pill |
 | `lib/components/editor/TimelineLayerRow.svelte` | Sticky layer header and cel cells for one layer row |
 | `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
 | `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
@@ -70,7 +72,7 @@ Key files:
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
 - `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
-- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, and timeline height are workspace-wide.
+- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette, theme, grid, preview visibility, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
 - **File → New sprite** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
@@ -140,12 +142,12 @@ When adding a tool:
 The shell is intentionally:
 
 ```
-Menu bar
+Menu bar (menus left, canvas/frame/layer readout centered, display toggles right)
 ├── Tool strip (left, thin, square buttons + tooltips)
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
     ├── Project tab strip (project tabs, dirty dots, close buttons, new-project)
-    ├── Canvas (fit/zoom, grid, cursor, floating zoom pill)
+    ├── Canvas (fit/zoom, grid, cursor, floating zoom pill, Preview window/scan-eye button in the top-right)
     ├── Resizable divider (drag, or focus and use ↑/↓)
     └── Timeline (Aseprite-style table: layer rows × frame columns, sticky headers, cel thumbnails, opacity footer)
 ```

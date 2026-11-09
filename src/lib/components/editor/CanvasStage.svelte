@@ -33,6 +33,7 @@
 	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
 	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
+	import Preview from "./Preview.svelte";
 
 	let stage: HTMLDivElement | undefined;
 	let canvas: HTMLCanvasElement | undefined;
@@ -274,6 +275,11 @@
 
 	function isEditable(): boolean {
 		return isDrawable;
+	}
+
+	function setCursor(point: Point | null): void {
+		editor.cursor = point;
+		if (point) editor.lastCursor = point;
 	}
 
 	function isPointSelected(point: Point | null): boolean {
@@ -1118,7 +1124,7 @@
 
 		event.preventDefault();
 		editor.playing = false;
-		editor.cursor = point;
+		setCursor(point);
 		capturePointer(event);
 
 		if (isSelectionTool(tool)) {
@@ -1271,7 +1277,7 @@
 		if (movingSelection) {
 			const point = pixelFromEvent(event, true);
 			if (point) {
-				editor.cursor = point;
+				setCursor(point);
 				updateSelectionMove(point);
 			}
 			return;
@@ -1280,7 +1286,7 @@
 		if (selecting) {
 			const point = pixelFromEvent(event, true);
 			if (point) {
-				editor.cursor = point;
+				setCursor(point);
 				updateRectSelection(point);
 			}
 			return;
@@ -1289,7 +1295,7 @@
 		if (lassoDragging) {
 			const point = pixelFromEvent(event, true);
 			if (point) {
-				editor.cursor = point;
+				setCursor(point);
 				appendLassoPoint(point);
 			}
 			return;
@@ -1298,7 +1304,7 @@
 		if (editor.tool === "curve" && curvePhase !== "idle") {
 			const point = pixelFromEvent(event, true);
 			if (!point) return;
-			editor.cursor = point;
+			setCursor(point);
 
 			if (curvePhase === "base" && curveDragging) {
 				if (!curveEnd || curveEnd.x !== point.x || curveEnd.y !== point.y) {
@@ -1326,7 +1332,7 @@
 		}
 
 		const point = pixelFromEvent(event);
-		editor.cursor = point;
+		setCursor(point);
 
 		if (editor.tool === "lasso") {
 			lassoHover = point;
@@ -1387,7 +1393,7 @@
 			}
 			curveDragging = false;
 			releasePointer(event);
-			editor.cursor = pixelFromEvent(event);
+			setCursor(pixelFromEvent(event));
 			return;
 		}
 
@@ -1429,12 +1435,12 @@
 			editor.touch();
 		}
 		releasePointer(event);
-		editor.cursor = pixelFromEvent(event);
+		setCursor(pixelFromEvent(event));
 	}
 
 	function handlePointerLeave(): void {
 		if (drawing || selecting || lassoDragging || movingSelection || panning) return;
-		editor.cursor = null;
+		setCursor(null);
 		hoveringSelection = false;
 		hoveringMirror = null;
 		if (editor.tool === "lasso") lassoHover = null;
@@ -1551,26 +1557,7 @@
 		></canvas>
 	</div>
 
-	<div class="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5">
-		<span
-			class="rounded-md border bg-background/90 px-2 py-1 font-mono text-[10px] font-medium tabular-nums shadow-sm backdrop-blur"
-		>
-			{editor.doc.width} × {editor.doc.height}
-		</span>
-		{#if editor.cursor}
-			<span
-				class="rounded-md border bg-background/90 px-2 py-1 font-mono text-[10px] tabular-nums text-muted-foreground shadow-sm backdrop-blur"
-			>
-				{editor.cursor.x}, {editor.cursor.y}
-			</span>
-		{/if}
-	</div>
-
-	<div
-		class="pointer-events-none absolute right-3 top-3 rounded-md border bg-background/90 px-2 py-1 font-mono text-[10px] tabular-nums text-muted-foreground shadow-sm backdrop-blur"
-	>
-		Frame {editor.activeFrame + 1} / {editor.frameCount}
-	</div>
+	<Preview />
 
 	<div
 		class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background/90 p-1 shadow-sm backdrop-blur"

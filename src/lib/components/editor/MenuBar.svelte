@@ -15,6 +15,7 @@
 	import Moon from "@lucide/svelte/icons/moon";
 	import Redo2 from "@lucide/svelte/icons/redo-2";
 	import Save from "@lucide/svelte/icons/save";
+	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
 	import Undo2 from "@lucide/svelte/icons/undo-2";
@@ -43,6 +44,7 @@
 	} = $props();
 
 	let fileInput: HTMLInputElement | undefined;
+	let cursor = $derived(editor.cursor ?? editor.lastCursor);
 
 	function activeRing(active: boolean): string {
 		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
@@ -170,6 +172,10 @@
 					<Grid3x3 class="size-4" />
 					Show pixel grid
 				</DropdownMenu.CheckboxItem>
+				<DropdownMenu.CheckboxItem bind:checked={editor.showPreview}>
+					<ScanEye class="size-4" />
+					Show preview
+				</DropdownMenu.CheckboxItem>
 				<DropdownMenu.Item onSelect={() => editor.toggleTheme()}>
 					{#if editor.theme === "dark"}
 						<Sun class="size-4" />
@@ -201,7 +207,27 @@
 		</DropdownMenu.Root>
 	</nav>
 
-	<div class="ml-auto flex items-center gap-3 pr-1">
+	<div class="flex min-w-0 flex-1 items-center justify-center px-3">
+		<div
+			class="flex min-w-0 items-center gap-2 rounded-md border bg-muted/20 px-2.5 py-1 font-mono text-[10px] tabular-nums text-muted-foreground shadow-sm"
+		>
+			<span class="shrink-0 font-medium text-foreground">
+				{editor.doc.width} × {editor.doc.height}
+			</span>
+			<span class="h-3 w-px shrink-0 bg-border" aria-hidden="true"></span>
+			<span class="shrink-0" title="Cursor position">
+				{cursor ? `${cursor.x}, ${cursor.y}` : "—, —"}
+			</span>
+			<span class="h-3 w-px shrink-0 bg-border" aria-hidden="true"></span>
+			<span class="shrink-0">Frame {editor.activeFrame + 1} / {editor.frameCount}</span>
+			<span class="h-3 w-px shrink-0 bg-border" aria-hidden="true"></span>
+			<span class="max-w-36 truncate" title="Current layer">
+				Layer: {editor.activeLayer.name}
+			</span>
+		</div>
+	</div>
+
+	<div class="flex shrink-0 items-center gap-3 pr-1">
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
