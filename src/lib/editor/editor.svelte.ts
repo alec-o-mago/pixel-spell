@@ -1,6 +1,7 @@
-import { normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
+import { isTransparent, normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
 import { saveProjectFile, type LoadedProject } from "./file.js";
+import { selectionBounds } from "./selection.js";
 import {
 	DEFAULT_PALETTE_ID,
 	MAX_PALETTE_COLORS,
@@ -10,20 +11,24 @@ import {
 	type Palette,
 } from "./palette.js";
 import type {
+	BackgroundKind,
 	ColorSlot,
+	GradientDither,
+	GradientShape,
 	Layer,
 	MirrorAxis,
 	MirrorKind,
 	PixelDoc,
 	Point,
 	ProjectTab,
+	ShapeKind,
 	ToolId,
 	ViewportSize,
 } from "./types.js";
 
 const HISTORY_LIMIT = 80;
 const MIN_SIZE = 1;
-const MAX_SIZE = 256;
+const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
 
@@ -45,9 +50,37 @@ interface ProjectSnapshot {
 	zoom: number | null;
 	panX: number;
 	panY: number;
+	rotation: number;
 	selection: Uint8Array | null;
 	undo: PixelDoc[];
 	redo: PixelDoc[];
+}
+
+/** In-memory copy of selected pixels, independent of the OS clipboard. */
+interface SelectionClipboard {
+	originX: number;
+	originY: number;
+	width: number;
+	height: number;
+	pixels: Uint32Array;
+	mask: Uint8Array;
+}
+
+/**
+ * Pixels temporarily floating above a cel. They are not applied until the
+ * floating selection is committed (deselected, replaced, or the move ends).
+ */
+export interface FloatingSelection {
+	layerId: string;
+	frame: number;
+	originX: number;
+	originY: number;
+	width: number;
+	height: number;
+	pixels: Uint32Array;
+	mask: Uint8Array;
+	/** True once the pre-move document has been pushed to the undo stack. */
+	historyPushed: boolean;
 }
 
 export class EditorState {
@@ -83,21 +116,35 @@ export class EditorState {
 	lockAlpha = $state(false);
 	pixelPerfect = $state(false);
 	shapeFilled = $state(false);
+	/** Shape drawn by the combined shape tool. */
+	shapeKind = $state<ShapeKind>("rectangle");
+	/** Shape drawn by the combined selection tool. */
+	selectionShape = $state<ShapeKind>("rectangle");
 	fillTolerance = $state(0);
 	fillContiguous = $state(true);
+	gradientTolerance = $state(0);
+	gradientContiguous = $state(true);
+	gradientShape = $state<GradientShape>("linear");
+	gradientDither = $state<GradientDither>("bayer2");
 	sampleAllLayers = $state(true);
 	magicWandDiagonal = $state(false);
 
 	/** Selected pixel mask for the active document, or null when nothing is selected. */
 	selection = $state<Uint8Array | null>(null);
 	selectionRevision = $state(0);
+	hasClipboard = $state(false);
+	/** Temporary preview content that has not been written into a cel yet. */
+	floating = $state<FloatingSelection | null>(null);
 
 	showGrid = $state(true);
+	gridSize = $state(1);
 	showPreview = $state(false);
 	zoom = $state<number | null>(null);
 	/** Canvas center offset from the stage center, in screen pixels. */
 	panX = $state(0);
 	panY = $state(0);
+	/** Canvas rotation in degrees, always a multiple of 15. */
+	rotation = $state(0);
 	viewport = $state<ViewportSize>({ w: 0, h: 0 });
 	playing = $state(false);
 	theme = $state<"light" | "dark">(readStoredTheme());
@@ -121,6 +168,7 @@ export class EditorState {
 	#undo: PixelDoc[] = [];
 	#redo: PixelDoc[] = [];
 	#states = new Map<string, ProjectSnapshot>();
+	#clipboard: SelectionClipboard | null = null;
 
 	constructor() {
 		const id = uid("project");
@@ -140,6 +188,7 @@ export class EditorState {
 			zoom: this.zoom,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -233,8 +282,13 @@ export class EditorState {
 	get fitZoom(): number {
 		const availableWidth = Math.max(0, this.viewport.w - 64);
 		const availableHeight = Math.max(0, this.viewport.h - 112);
+		const radians = (this.rotation * Math.PI) / 180;
+		const cosine = Math.abs(Math.cos(radians));
+		const sine = Math.abs(Math.sin(radians));
+		const rotatedWidth = this.doc.width * cosine + this.doc.height * sine;
+		const rotatedHeight = this.doc.width * sine + this.doc.height * cosine;
 		const fit = Math.floor(
-			Math.min(availableWidth / this.doc.width, availableHeight / this.doc.height),
+			Math.min(availableWidth / rotatedWidth, availableHeight / rotatedHeight),
 		);
 		return clamp(Number.isFinite(fit) ? fit : 1, MIN_ZOOM, MAX_ZOOM);
 	}
@@ -247,12 +301,14 @@ export class EditorState {
 		this.tool = tool;
 	}
 
-	setSelection(mask: Uint8Array | null): void {
+	setSelection(mask: Uint8Array | null, keepFloating = false): void {
+		if (!keepFloating && this.floating) this.commitFloatingSelection();
 		this.selection = mask;
 		this.selectionRevision++;
 	}
 
 	clearSelection(): void {
+		if (this.floating) this.commitFloatingSelection();
 		if (!this.selection) return;
 		this.selection = null;
 		this.selectionRevision++;
@@ -262,6 +318,262 @@ export class EditorState {
 		const mask = new Uint8Array(this.doc.width * this.doc.height);
 		mask.fill(1);
 		this.setSelection(mask);
+	}
+
+	/** Builds a clipboard-style snapshot of the current selection. */
+	#captureSelection(): SelectionClipboard | null {
+		const mask = this.selection;
+		if (!mask) return null;
+
+		const floating = this.floating;
+		if (
+			floating &&
+			floating.layerId === this.activeLayer?.id &&
+			floating.frame === this.activeFrame
+		) {
+			return {
+				originX: floating.originX,
+				originY: floating.originY,
+				width: floating.width,
+				height: floating.height,
+				pixels: new Uint32Array(floating.pixels),
+				mask: new Uint8Array(floating.mask),
+			};
+		}
+
+		const cel = this.activeLayer?.cels[this.activeFrame];
+		if (!cel) return null;
+
+		const bounds = selectionBounds(mask, this.doc.width, this.doc.height);
+		if (!bounds) return null;
+
+		const pixels = new Uint32Array(bounds.width * bounds.height);
+		const clipMask = new Uint8Array(bounds.width * bounds.height);
+
+		for (let y = 0; y < bounds.height; y++) {
+			const sourceRow = (bounds.y + y) * this.doc.width + bounds.x;
+			const targetRow = y * bounds.width;
+			for (let x = 0; x < bounds.width; x++) {
+				const sourceIndex = sourceRow + x;
+				if (!mask[sourceIndex]) continue;
+				clipMask[targetRow + x] = 1;
+
+				const value = cel[sourceIndex]!;
+				// Transparent pixels are ignored so they can never erase a
+				// destination pixel when the content is applied.
+				if (!isTransparent(value)) pixels[targetRow + x] = value;
+			}
+		}
+
+		return {
+			originX: bounds.x,
+			originY: bounds.y,
+			width: bounds.width,
+			height: bounds.height,
+			pixels,
+			mask: clipMask,
+		};
+	}
+
+	/** Copies the selected pixels of the active cel into the internal clipboard. */
+	copySelection(): boolean {
+		const data = this.#captureSelection();
+		if (!data) return false;
+		this.#clipboard = data;
+		this.hasClipboard = true;
+		return true;
+	}
+
+	/**
+	 * Creates floating content from the current selection without changing the
+	 * cel. The caller moves it and commits it when the drag ends.
+	 */
+	createFloatingSelection(): FloatingSelection | null {
+		const layer = this.activeLayer;
+		const cel = layer?.cels[this.activeFrame];
+		if (!layer || !cel) return null;
+
+		const data = this.#captureSelection();
+		if (!data) return null;
+
+		return {
+			layerId: layer.id,
+			frame: this.activeFrame,
+			originX: data.originX,
+			originY: data.originY,
+			width: data.width,
+			height: data.height,
+			pixels: data.pixels,
+			mask: data.mask,
+			historyPushed: false,
+		};
+	}
+
+	/**
+	 * Starts moving an existing selection: pushes one history entry, removes the
+	 * source pixels, and places the content in the floating layer.
+	 */
+	beginFloatingMove(
+		floating: FloatingSelection,
+		targetX: number,
+		targetY: number,
+	): boolean {
+		const layer = this.doc.layers.find((item) => item.id === floating.layerId);
+		const cel = layer?.cels[floating.frame];
+		if (!cel) return false;
+
+		this.pushHistory();
+
+		const width = this.doc.width;
+		const height = this.doc.height;
+		const sourceX = floating.originX;
+		const sourceY = floating.originY;
+
+		for (let y = 0; y < floating.height; y++) {
+			const pixelY = sourceY + y;
+			if (pixelY < 0 || pixelY >= height) continue;
+			for (let x = 0; x < floating.width; x++) {
+				if (!floating.mask[y * floating.width + x]) continue;
+				const pixelX = sourceX + x;
+				if (pixelX < 0 || pixelX >= width) continue;
+				cel[pixelY * width + pixelX] = 0;
+			}
+		}
+
+		floating.historyPushed = true;
+		floating.originX = targetX;
+		floating.originY = targetY;
+		this.floating = floating;
+		this.#syncFloatingMask();
+		this.revision++;
+		return true;
+	}
+
+	/** Moves the current floating content without applying it. */
+	moveFloatingSelection(x: number, y: number): void {
+		const floating = this.floating;
+		if (!floating) return;
+		floating.originX = x;
+		floating.originY = y;
+		this.#syncFloatingMask();
+	}
+
+	#syncFloatingMask(): void {
+		const floating = this.floating;
+		if (!floating) return;
+
+		const width = this.doc.width;
+		const height = this.doc.height;
+		const mask = new Uint8Array(width * height);
+
+		for (let y = 0; y < floating.height; y++) {
+			const destY = floating.originY + y;
+			if (destY < 0 || destY >= height) continue;
+			for (let x = 0; x < floating.width; x++) {
+				const destX = floating.originX + x;
+				if (destX < 0 || destX >= width) continue;
+				if (floating.mask[y * floating.width + x]) {
+					mask[destY * width + destX] = 1;
+				}
+			}
+		}
+
+		this.selection = mask;
+		this.selectionRevision++;
+	}
+
+	/**
+	 * Applies floating content to its original layer and frame. Transparent
+	 * floating pixels leave the destination untouched.
+	 */
+	commitFloatingSelection(): boolean {
+		const floating = this.floating;
+		if (!floating) return false;
+
+		// Detach first so the history push below cannot re-enter this method.
+		this.floating = null;
+
+		const layer = this.doc.layers.find((item) => item.id === floating.layerId);
+		const cel = layer?.cels[floating.frame];
+		if (!cel) {
+			this.selectionRevision++;
+			return false;
+		}
+
+		const width = this.doc.width;
+		const height = this.doc.height;
+		let changed = false;
+
+		for (let y = 0; y < floating.height && !changed; y++) {
+			const destY = floating.originY + y;
+			if (destY < 0 || destY >= height) continue;
+			for (let x = 0; x < floating.width; x++) {
+				const destX = floating.originX + x;
+				if (destX < 0 || destX >= width) continue;
+				const value = floating.pixels[y * floating.width + x]!;
+				if (isTransparent(value)) continue;
+				if (cel[destY * width + destX] !== value) {
+					changed = true;
+					break;
+				}
+			}
+		}
+
+		if (changed) {
+			if (!floating.historyPushed) this.pushHistory();
+			for (let y = 0; y < floating.height; y++) {
+				const destY = floating.originY + y;
+				if (destY < 0 || destY >= height) continue;
+				for (let x = 0; x < floating.width; x++) {
+					const destX = floating.originX + x;
+					if (destX < 0 || destX >= width) continue;
+					const value = floating.pixels[y * floating.width + x]!;
+					if (isTransparent(value)) continue;
+					cel[destY * width + destX] = value;
+				}
+			}
+			this.touch();
+		}
+
+		this.selectionRevision++;
+		return changed;
+	}
+
+	/**
+	 * Pastes the internal clipboard as floating content. It is not written into
+	 * the cel until the user deselects or starts another selection.
+	 */
+	pasteSelection(): boolean {
+		const clipboard = this.#clipboard;
+		if (!clipboard) return false;
+
+		const layer = this.activeLayer;
+		if (!layer || layer.locked || !layer.visible) return false;
+		if (!layer.cels[this.activeFrame]) return false;
+
+		if (this.floating) this.commitFloatingSelection();
+
+		const targetBounds = selectionBounds(
+			this.selection,
+			this.doc.width,
+			this.doc.height,
+		);
+		const targetX = targetBounds ? targetBounds.x : clipboard.originX;
+		const targetY = targetBounds ? targetBounds.y : clipboard.originY;
+
+		this.floating = {
+			layerId: layer.id,
+			frame: this.activeFrame,
+			originX: targetX,
+			originY: targetY,
+			width: clipboard.width,
+			height: clipboard.height,
+			pixels: new Uint32Array(clipboard.pixels),
+			mask: new Uint8Array(clipboard.mask),
+			historyPushed: false,
+		};
+		this.#syncFloatingMask();
+		return true;
 	}
 
 	toggleMirror(kind: MirrorKind): void {
@@ -410,6 +722,45 @@ export class EditorState {
 		this.#persistPalettes();
 	}
 
+	removeLastPaletteColor(): void {
+		const palette = this.activePalette;
+		if (palette.builtin || palette.colors.length === 0) return;
+		palette.colors.pop();
+		this.#persistPalettes();
+	}
+
+	/** Adds an imported palette, makes it active, and returns its id. */
+	importPalette(name: string, colors: string[]): string | null {
+		const unique: string[] = [];
+		for (const color of colors) {
+			const normalized = normalizeHex(color);
+			if (!normalized || unique.includes(normalized)) continue;
+			unique.push(normalized);
+			if (unique.length >= MAX_PALETTE_COLORS) break;
+		}
+		if (unique.length === 0) return null;
+
+		const baseName = (name.trim() || "Imported palette").slice(0, 40);
+		const usedNames = new Set(this.palettes.map((palette) => palette.name.toLowerCase()));
+		let paletteName = baseName;
+		let suffixIndex = 2;
+		while (usedNames.has(paletteName.toLowerCase())) {
+			const suffix = ` (${suffixIndex})`;
+			paletteName = `${baseName.slice(0, Math.max(1, 40 - suffix.length))}${suffix}`;
+			suffixIndex++;
+		}
+
+		const palette: Palette = {
+			id: uid("palette"),
+			name: paletteName,
+			colors: unique,
+		};
+		this.palettes.push(palette);
+		this.activePaletteId = palette.id;
+		this.#persistPalettes();
+		return palette.id;
+	}
+
 	toggleTheme(): void {
 		this.theme = this.theme === "dark" ? "light" : "dark";
 	}
@@ -420,6 +771,22 @@ export class EditorState {
 
 	zoomOut(): void {
 		this.zoom = clamp(this.effectiveZoom - 1, MIN_ZOOM, MAX_ZOOM);
+	}
+
+	setGridSize(size: number): void {
+		if (!Number.isFinite(size)) return;
+		this.gridSize = clamp(Math.round(size), 1, 64);
+	}
+
+	setRotation(degrees: number): void {
+		if (!Number.isFinite(degrees)) return;
+		const snapped = Math.round(degrees / 15) * 15;
+		this.rotation = clamp(snapped, -180, 180);
+	}
+
+	rotateBy(degrees: number): void {
+		if (!Number.isFinite(degrees)) return;
+		this.rotation = clamp(this.rotation + degrees, -180, 180);
 	}
 
 	fitToWindow(): void {
@@ -435,6 +802,8 @@ export class EditorState {
 	}
 
 	pushHistory(): void {
+		// Any new edit implicitly applies content that is still floating.
+		if (this.floating) this.commitFloatingSelection();
 		this.#undo.push(cloneDoc(this.doc));
 		if (this.#undo.length > HISTORY_LIMIT) this.#undo.shift();
 		this.#redo = [];
@@ -445,6 +814,7 @@ export class EditorState {
 	}
 
 	undo(): void {
+		if (this.floating) this.commitFloatingSelection();
 		const previous = this.#undo.pop();
 		if (!previous) return;
 		this.#redo.push(cloneDoc(this.doc));
@@ -455,6 +825,7 @@ export class EditorState {
 	}
 
 	redo(): void {
+		if (this.floating) this.commitFloatingSelection();
 		const next = this.#redo.pop();
 		if (!next) return;
 		this.#undo.push(cloneDoc(this.doc));
@@ -470,6 +841,7 @@ export class EditorState {
 		}
 		this.activeFrame = clamp(this.activeFrame, 0, this.doc.frames.length - 1);
 		this.playing = false;
+		this.floating = null;
 		// The selection may no longer match the restored pixels.
 		this.selection = null;
 		this.selectionRevision++;
@@ -480,6 +852,8 @@ export class EditorState {
 	}
 
 	#syncActiveProject(): void {
+		if (this.floating) this.commitFloatingSelection();
+
 		const tab = this.projects.find((project) => project.id === this.activeProjectId);
 		const snapshot = this.#states.get(this.activeProjectId);
 		if (!tab || !snapshot) return;
@@ -493,6 +867,7 @@ export class EditorState {
 		snapshot.zoom = this.zoom;
 		snapshot.panX = this.panX;
 		snapshot.panY = this.panY;
+		snapshot.rotation = this.rotation;
 		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
@@ -510,6 +885,8 @@ export class EditorState {
 		this.zoom = snapshot.zoom;
 		this.panX = snapshot.panX;
 		this.panY = snapshot.panY;
+		this.rotation = snapshot.rotation;
+		this.floating = null;
 		this.selection = snapshot.selection;
 		this.selectionRevision++;
 		this.name = tab.name;
@@ -580,11 +957,16 @@ export class EditorState {
 		}
 	}
 
-	newProject(width: number, height: number): void {
+	newProject(
+		width: number,
+		height: number,
+		options: { name?: string; background?: BackgroundKind } = {},
+	): void {
 		const w = clamp(Math.round(width) || 32, MIN_SIZE, MAX_SIZE);
 		const h = clamp(Math.round(height) || 32, MIN_SIZE, MAX_SIZE);
-		const doc = createDoc(w, h);
-		const name = this.#nextUntitledName();
+		const doc = createDoc(w, h, options.background ?? "transparent");
+		const requestedName = options.name?.trim().slice(0, 60);
+		const name = requestedName || this.#nextUntitledName();
 
 		this.#syncActiveProject();
 		const id = uid("project");
@@ -595,6 +977,7 @@ export class EditorState {
 			zoom: null,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -620,11 +1003,62 @@ export class EditorState {
 			zoom: null,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
 		});
 		this.projects.push({ id, name, dirty: false, modified: true });
+		this.#activateProject(id);
+	}
+
+	/** Creates a new, unsaved project tab from an imported image. */
+	importImageProject(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		const width = clamp(Math.round(image.width) || 1, MIN_SIZE, MAX_SIZE);
+		const height = clamp(Math.round(image.height) || 1, MIN_SIZE, MAX_SIZE);
+		const pixels = new Uint32Array(width * height);
+		pixels.set(image.pixels.subarray(0, Math.min(image.pixels.length, pixels.length)));
+
+		const doc: PixelDoc = {
+			width,
+			height,
+			fps: 12,
+			frames: [{ id: uid("frame") }],
+			layers: [
+				{
+					id: uid("layer"),
+					name: "Imported image",
+					visible: true,
+					locked: false,
+					opacity: 1,
+					cels: [pixels],
+				},
+			],
+		};
+
+		const requestedName = image.name.trim().slice(0, 60);
+		const name = requestedName || this.#nextUntitledName();
+
+		this.#syncActiveProject();
+		const id = uid("project");
+		this.#states.set(id, {
+			doc,
+			activeLayerId: doc.layers[0]!.id,
+			activeFrame: 0,
+			zoom: null,
+			panX: 0,
+			panY: 0,
+			rotation: 0,
+			selection: null,
+			undo: [],
+			redo: [],
+		});
+		this.projects.push({ id, name, dirty: true, modified: true });
 		this.#activateProject(id);
 	}
 
@@ -635,6 +1069,7 @@ export class EditorState {
 	}
 
 	saveToFile(): void {
+		if (this.floating) this.commitFloatingSelection();
 		saveProjectFile(
 			this.doc,
 			this.activePalette.colors,
@@ -646,9 +1081,10 @@ export class EditorState {
 	}
 
 	selectLayer(id: string): void {
-		if (this.doc.layers.some((layer) => layer.id === id)) {
-			this.activeLayerId = id;
-		}
+		if (!this.doc.layers.some((layer) => layer.id === id)) return;
+		if (id === this.activeLayerId) return;
+		if (this.floating) this.commitFloatingSelection();
+		this.activeLayerId = id;
 	}
 
 	toggleLayerVisibility(id: string): void {
@@ -753,6 +1189,15 @@ export class EditorState {
 	}
 
 	deleteSelection(): void {
+		if (this.floating) {
+			// Deleting a floating selection discards its unapplied content.
+			this.floating = null;
+			this.selection = null;
+			this.selectionRevision++;
+			this.revision++;
+			return;
+		}
+
 		const mask = this.selection;
 		if (!mask) return;
 
@@ -807,16 +1252,20 @@ export class EditorState {
 	}
 
 	selectFrame(index: number): void {
-		this.activeFrame = clamp(index, 0, this.doc.frames.length - 1);
+		const next = clamp(index, 0, this.doc.frames.length - 1);
+		if (next === this.activeFrame) return;
+		if (this.floating) this.commitFloatingSelection();
+		this.activeFrame = next;
 	}
 
 	nextFrame(): void {
-		this.activeFrame = (this.activeFrame + 1) % this.doc.frames.length;
+		this.selectFrame((this.activeFrame + 1) % this.doc.frames.length);
 	}
 
 	previousFrame(): void {
-		this.activeFrame =
-			(this.activeFrame - 1 + this.doc.frames.length) % this.doc.frames.length;
+		this.selectFrame(
+			(this.activeFrame - 1 + this.doc.frames.length) % this.doc.frames.length,
+		);
 	}
 
 	addFrame(): void {

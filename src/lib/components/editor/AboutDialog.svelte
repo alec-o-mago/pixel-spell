@@ -1,12 +1,9 @@
 <script lang="ts">
 	import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
-	import { Badge } from "$lib/components/ui/badge/index.js";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import * as Dialog from "$lib/components/ui/dialog/index.js";
 
 	let { open = $bindable(false) } = $props();
-
-	const stack = ["Svelte 5", "Vite", "TypeScript", "shadcn-svelte", "Lucide"];
 </script>
 
 <Dialog.Root bind:open>
@@ -30,11 +27,7 @@
 				Draw sprites, build layered artwork and animate frame by frame. Everything runs
 				in the browser and projects can be saved as portable JSON files.
 			</p>
-			<div class="flex flex-wrap gap-1.5">
-				{#each stack as item (item)}
-					<Badge variant="outline">{item}</Badge>
-				{/each}
-			</div>
+			<p>Made by Alec, the Wizard🧙‍♂️✨</p>
 			<p class="font-mono text-[10px] text-muted-foreground/80">Version 0.1.0</p>
 		</div>
 

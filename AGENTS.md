@@ -40,10 +40,12 @@ Key files:
 | `lib/editor/editor.svelte.ts` | Singleton `editor` state, history, layer/frame operations, zoom/theme |
 | `lib/editor/types.ts` | `PixelDoc`, `Layer`, `Frame`, `ToolId`, `Point` |
 | `lib/editor/doc.ts` | Document creation/cloning, layer compositing |
-| `lib/editor/draw.ts` | Brush, line, rectangle, ellipse, flood fill |
+| `lib/editor/draw.ts` | Brush, line, shapes (rectangle, ellipse, star, heart), flood fill, gradients |
 | `lib/editor/render.ts` | Canvas scaling and thumbnail rendering |
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
-| `lib/editor/file.ts` | PNG/sprite-sheet export, project save/parse |
+| `lib/editor/file.ts` | Project serialization, save helpers |
+| `lib/editor/import.ts` | Image decoding, palette parsing, and import analysis |
+| `lib/editor/export.ts` | Image, sprite sheet, and GIF export encoding |
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Built-in palette, palette type, and localStorage persistence |
 | `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
@@ -61,6 +63,7 @@ Key files:
 - Pixel data lives in `Uint32Array` cels. Typed arrays are **not** deeply proxied, so mutating pixels will not trigger a re-render on its own. Call `editor.touch()` (increments `revision`) after changing pixel data, or increment `editor.revision` after structural changes that do not already do so.
 - Any mutation that should be undoable must call `editor.pushHistory()` **before** the change. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
 - `editor.revision` is the render invalidation signal. `CanvasStage` and `CelThumb` read it inside `$effect`.
+- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrame()` or a full sprite redraw.
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
 
 ## Projects and tabs
@@ -70,11 +73,11 @@ Key files:
 - Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame, zoom, pan, undo/redo).
 - Before switching, creating, opening, or saving, `#syncActiveProject()` copies live state into the active tab/snapshot. `#activateProject(id)` loads a target snapshot and tab metadata into the live fields.
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
-- `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
+- `newProject(width, height, { name, background })` and `openProject(loaded)` add a tab and activate it. `background` is `transparent`, `white`, or `black`; opaque backgrounds fill the initial layer and name it `Background`. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
-- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
+- Undo/redo, zoom, pan, rotation, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
-- **File → New sprite** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
+- **File → New project** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
 ## Pixel format
 
@@ -97,7 +100,7 @@ Pixels are packed little-endian RGBA:
 2. On pointer down: guard against hidden/locked layers, push history, snapshot the active cel for shape preview.
 3. Freehand tools paint through `paintBrush` (applies size and X/Y symmetry).
 4. Shape tools restore the backup cel on each move and redraw from the start point, so the preview is non-destructive until pointer up.
-5. Fill and eyedropper are single-click operations.
+5. Fill and eyedropper are single-click operations; the gradient tool previews from a backup cel while dragging.
 6. Every pixel change calls `editor.touch()`.
 
 When adding a tool:
@@ -147,7 +150,7 @@ Menu bar (menus left, canvas/frame/layer readout centered, display toggles right
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
     ├── Project tab strip (project tabs, dirty dots, close buttons, new-project)
-    ├── Canvas (fit/zoom, grid, cursor, floating zoom pill, Preview window/scan-eye button in the top-right)
+    ├── Canvas (fit/rotation/zoom controls bottom right, grid controls bottom left, cursor, Preview window/scan-eye button in the top-right)
     ├── Resizable divider (drag, or focus and use ↑/↓)
     └── Timeline (Aseprite-style table: layer rows × frame columns, sticky headers, cel thumbnails, opacity footer)
 ```
@@ -173,7 +176,7 @@ Preserve these regions and their relative placement when making changes.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
 - `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
-- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center and translated by `editor.panX`/`editor.panY`, so panning works at every zoom level. Pointer coordinates still come from the canvas `getBoundingClientRect`, so the transform does not affect drawing. Middle-mouse drag pans regardless of the active tool. Pan is clamped so at least one sprite pixel stays visible, and a resize that invalidates the pan recenters the view. Zooming moves the view halfway from the current center toward the pointer. Mirror guides are drawn on a stage-sized overlay and can be dragged from anywhere on the stage, not just the canvas.
+- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Custom palettes are workspace preferences stored in `localStorage` under `pixel-spell-palettes`; the built-in palette always has id `default` and is never persisted or editable. Custom palettes are capped at 256 colors and new ones start empty.
@@ -183,7 +186,7 @@ Preserve these regions and their relative placement when making changes.
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
-- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
+- Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Project tabs switch correctly with independent documents, undo history, zoom, and dirty state; closing a dirty project confirms first.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.

@@ -1,6 +1,5 @@
 <script lang="ts">
-	import Circle from "@lucide/svelte/icons/circle";
-	import CircleDashed from "@lucide/svelte/icons/circle-dashed";
+	import Blend from "@lucide/svelte/icons/blend";
 	import Dices from "@lucide/svelte/icons/dices";
 	import Droplets from "@lucide/svelte/icons/droplets";
 	import Eraser from "@lucide/svelte/icons/eraser";
@@ -28,10 +27,8 @@
 	<ZoomIn class={className} />
 {:else if tool === "magic-wand"}
 	<WandSparkles class={className} />
-{:else if tool === "rect-select"}
+{:else if tool === "shape-select"}
 	<SquareDashed class={className} />
-{:else if tool === "ellipse-select"}
-	<CircleDashed class={className} />
 {:else if tool === "lasso"}
 	<LassoSelect class={className} />
 {:else if tool === "select-color"}
@@ -46,12 +43,12 @@
 	<Slash class={className} />
 {:else if tool === "curve"}
 	<Spline class={className} />
-{:else if tool === "rectangle"}
+{:else if tool === "shape"}
 	<Square class={className} />
-{:else if tool === "ellipse"}
-	<Circle class={className} />
 {:else if tool === "fill"}
 	<PaintBucket class={className} />
+{:else if tool === "gradient"}
+	<Blend class={className} />
 {:else if tool === "blur"}
 	<Droplets class={className} />
 {:else if tool === "jumble"}

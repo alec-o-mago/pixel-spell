@@ -2,8 +2,7 @@ export type ToolId =
 	| "pan"
 	| "zoom"
 	| "magic-wand"
-	| "rect-select"
-	| "ellipse-select"
+	| "shape-select"
 	| "lasso"
 	| "select-color"
 	| "pencil"
@@ -11,12 +10,24 @@ export type ToolId =
 	| "eraser"
 	| "line"
 	| "curve"
-	| "rectangle"
-	| "ellipse"
+	| "shape"
 	| "fill"
+	| "gradient"
 	| "eyedropper"
 	| "blur"
 	| "jumble";
+
+/** Raster shapes available to the shape and shape-selection tools. */
+export type ShapeKind = "rectangle" | "ellipse" | "star" | "heart";
+
+/** Gradient direction shapes. */
+export type GradientShape = "linear" | "radial";
+
+/** Bayer matrices available to the gradient tool. */
+export type GradientDither = "none" | "bayer2" | "bayer4" | "bayer8";
+
+/** Initial canvas fill chosen when a project is created. */
+export type BackgroundKind = "transparent" | "white" | "black";
 
 /** Which mouse button a color is assigned to. */
 export type ColorSlot = "primary" | "secondary";

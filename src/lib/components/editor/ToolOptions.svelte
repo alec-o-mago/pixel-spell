@@ -1,13 +1,24 @@
 <script lang="ts">
+	import Circle from "@lucide/svelte/icons/circle";
+	import Slash from "@lucide/svelte/icons/slash";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import { TOOL_BY_ID } from "$lib/editor/tools.js";
+	import type { GradientDither } from "$lib/editor/types.js";
+	import ShapePicker from "./ShapePicker.svelte";
 	import ToolIcon from "./ToolIcon.svelte";
 
+	const DITHER_OPTIONS: { id: GradientDither; label: string }[] = [
+		{ id: "none", label: "None" },
+		{ id: "bayer2", label: "Bayer 2x2" },
+		{ id: "bayer4", label: "Bayer 4x4" },
+		{ id: "bayer8", label: "Bayer 8x8" },
+	];
+
 	let tool = $derived(TOOL_BY_ID[editor.tool]);
-	let isShape = $derived(editor.tool === "rectangle" || editor.tool === "ellipse");
+	let isShape = $derived(editor.tool === "shape");
 	let showSize = $derived(
 		editor.tool === "pencil" ||
 			editor.tool === "eraser" ||
@@ -73,14 +84,14 @@
 					<Switch bind:checked={editor.magicWandDiagonal} />
 				</label>
 				{@render deselectAction()}
-			{:else if editor.tool === "rect-select"}
+			{:else if editor.tool === "shape-select"}
+				<div class="space-y-2.5">
+					<span class="text-xs font-medium">Selection shape</span>
+					<ShapePicker bind:value={editor.selectionShape} />
+				</div>
 				<p class="text-[10px] leading-relaxed text-muted-foreground">
-					Selects a rectangular area. Drag inside an existing selection to move its pixels.
-				</p>
-				{@render deselectAction()}
-			{:else if editor.tool === "ellipse-select"}
-				<p class="text-[10px] leading-relaxed text-muted-foreground">
-					Selects an elliptical area. Drag inside an existing selection to move its pixels.
+					Drag to select a {editor.selectionShape}. Drag inside an existing selection to move
+					its pixels.
 				</p>
 				{@render deselectAction()}
 			{:else if editor.tool === "lasso"}
@@ -216,7 +227,87 @@
 					</span>
 					<Switch bind:checked={editor.fillContiguous} />
 				</label>
+			{:else if editor.tool === "gradient"}
+				<div class="space-y-2.5">
+					<div class="flex items-center justify-between">
+						<span class="text-xs font-medium">Tolerance</span>
+						<span
+							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
+						>
+							{editor.gradientTolerance}%
+						</span>
+					</div>
+					<Slider type="single" min={0} max={100} step={1} bind:value={editor.gradientTolerance} />
+					<p class="text-[10px] leading-snug text-muted-foreground">
+						Higher values include more colors close to the clicked pixel.
+					</p>
+				</div>
+
+				<label
+					class="flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
+				>
+					<span class="grid gap-0.5">
+						<span class="text-xs font-medium">Contiguous</span>
+						<span class="text-[10px] leading-snug text-muted-foreground">
+							Only apply the gradient to the connected region around the click.
+						</span>
+					</span>
+					<Switch bind:checked={editor.gradientContiguous} />
+				</label>
+
+				<div class="space-y-2.5">
+					<span class="text-xs font-medium">Shape</span>
+					<div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Gradient shape">
+						<Button
+							variant={editor.gradientShape === "linear" ? "secondary" : "outline"}
+							size="sm"
+							class="h-auto flex-col gap-1 py-2"
+							onclick={() => (editor.gradientShape = "linear")}
+							aria-pressed={editor.gradientShape === "linear"}
+						>
+							<Slash class="size-4" />
+							<span class="text-[10px]">Linear</span>
+						</Button>
+						<Button
+							variant={editor.gradientShape === "radial" ? "secondary" : "outline"}
+							size="sm"
+							class="h-auto flex-col gap-1 py-2"
+							onclick={() => (editor.gradientShape = "radial")}
+							aria-pressed={editor.gradientShape === "radial"}
+						>
+							<Circle class="size-4" />
+							<span class="text-[10px]">Radial</span>
+						</Button>
+					</div>
+				</div>
+
+				<div class="space-y-2.5">
+					<span class="text-xs font-medium">Dithering</span>
+					<div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Dithering">
+						{#each DITHER_OPTIONS as option (option.id)}
+							<Button
+								variant={editor.gradientDither === option.id ? "secondary" : "outline"}
+								size="sm"
+								onclick={() => (editor.gradientDither = option.id)}
+								aria-pressed={editor.gradientDither === option.id}
+							>
+								{option.label}
+							</Button>
+						{/each}
+					</div>
+					<p class="text-[10px] leading-snug text-muted-foreground">
+						Bayer patterns create a two-color dithered transition; None blends the colors
+						smoothly.
+					</p>
+				</div>
 			{:else}
+				{#if isShape}
+					<div class="space-y-2.5">
+						<span class="text-xs font-medium">Shape</span>
+						<ShapePicker bind:value={editor.shapeKind} />
+					</div>
+				{/if}
+
 				{#if showSize}
 					<div class="space-y-2.5">
 						<div class="flex items-center justify-between">

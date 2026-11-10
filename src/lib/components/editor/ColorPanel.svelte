@@ -1,12 +1,13 @@
 <script lang="ts">
 	import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
+	import Minus from "@lucide/svelte/icons/minus";
 	import PaletteIcon from "@lucide/svelte/icons/palette";
 	import Pencil from "@lucide/svelte/icons/pencil";
 	import Plus from "@lucide/svelte/icons/plus";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
-	import X from "@lucide/svelte/icons/x";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
+	import { Separator } from "$lib/components/ui/separator/index.js";
 	import {
 		colorWithAlpha,
 		hexToRgb,
@@ -168,10 +169,18 @@
 		!paletteEditable
 			? "The default palette cannot be modified"
 			: paletteColorCount >= MAX_PALETTE_COLORS
-				? `Palette is full (${MAX_PALETTE_COLORS} colors)`
+				? "Palette is full"
 				: activePalette.colors.includes(currentPaletteColor)
 					? "Color is already in the palette"
 					: "Add current color to palette",
+	);
+	let canRemovePaletteColor = $derived(paletteEditable && paletteColorCount > 0);
+	let removePaletteColorTitle = $derived(
+		!paletteEditable
+			? "The default palette cannot be modified"
+			: paletteColorCount === 0
+				? "Palette is empty"
+				: "Remove last color from palette",
 	);
 
 	let renamingPalette = $state(false);
@@ -392,33 +401,23 @@
 						variant="ghost"
 						size="icon-xs"
 						class="text-muted-foreground"
+						onclick={() => editor.removeLastPaletteColor()}
+						disabled={!canRemovePaletteColor}
+						title={removePaletteColorTitle}
+						aria-label="Remove last color from palette"
+					>
+						<Minus class="size-3.5" />
+					</Button>
+					<Separator orientation="vertical" class="mx-1 h-4" />
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground"
 						onclick={createPalette}
 						title="New palette"
 						aria-label="New palette"
 					>
 						<PaletteIcon class="size-3.5" />
-					</Button>
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						class="text-muted-foreground"
-						onclick={startPaletteRename}
-						disabled={!paletteEditable}
-						title={paletteEditable ? "Rename palette" : "The default palette cannot be renamed"}
-						aria-label="Rename palette"
-					>
-						<Pencil class="size-3.5" />
-					</Button>
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						class="text-muted-foreground"
-						onclick={deletePalette}
-						disabled={!paletteEditable}
-						title={paletteEditable ? "Delete palette" : "The default palette cannot be deleted"}
-						aria-label="Delete palette"
-					>
-						<Trash2 class="size-3.5" />
 					</Button>
 				</div>
 			</div>
@@ -453,11 +452,28 @@
 						{/each}
 					</select>
 				{/if}
-				<span
-					class="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground"
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					class="shrink-0 text-muted-foreground"
+					onclick={startPaletteRename}
+					disabled={!paletteEditable}
+					title={paletteEditable ? "Rename palette" : "The default palette cannot be renamed"}
+					aria-label="Rename palette"
 				>
-					{paletteColorCount}/{MAX_PALETTE_COLORS}
-				</span>
+					<Pencil class="size-3.5" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					class="shrink-0 text-muted-foreground"
+					onclick={deletePalette}
+					disabled={!paletteEditable}
+					title={paletteEditable ? "Delete palette" : "The default palette cannot be deleted"}
+					aria-label="Delete palette"
+				>
+					<Trash2 class="size-3.5" />
+				</Button>
 			</div>
 
 			<div class="max-h-44 overflow-y-auto pr-1">
@@ -469,7 +485,7 @@
 					</p>
 				{:else}
 					<div class="grid grid-cols-8 gap-1.5">
-						{#each activePalette.colors as color, index (color)}
+						{#each activePalette.colors as color (color)}
 							<div class="group relative aspect-square">
 								<button
 									type="button"
@@ -494,17 +510,6 @@
 										></span>
 									{/if}
 								</button>
-								{#if paletteEditable}
-									<button
-										type="button"
-										class="absolute right-0.5 top-0.5 grid size-3.5 place-items-center rounded-full bg-background/90 text-muted-foreground opacity-0 ring-1 ring-border transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground focus-visible:pointer-events-auto focus-visible:opacity-100"
-										onclick={() => editor.removePaletteColor(index)}
-										title={`Remove ${color} from palette`}
-										aria-label={`Remove ${color} from palette`}
-									>
-										<X class="size-2.5" />
-									</button>
-								{/if}
 							</div>
 						{/each}
 					</div>

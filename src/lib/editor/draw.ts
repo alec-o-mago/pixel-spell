@@ -1,4 +1,9 @@
-import type { MirrorAxis } from "./types.js";
+import type {
+	GradientDither,
+	GradientShape,
+	MirrorAxis,
+	ShapeKind,
+} from "./types.js";
 
 export type PixelWriter = (x: number, y: number) => void;
 
@@ -270,6 +275,182 @@ export function plotEllipse(
 	}
 }
 
+/** Outline of a five-pointed star inscribed in the drag rectangle. */
+function starPoints(
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { x: number; y: number }[] {
+	const centerX = (minX + maxX + 1) / 2;
+	const centerY = (minY + maxY + 1) / 2;
+	const radiusX = (maxX - minX + 1) / 2;
+	const radiusY = (maxY - minY + 1) / 2;
+	const points: { x: number; y: number }[] = [];
+
+	for (let index = 0; index < 10; index++) {
+		const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+		const radius = index % 2 === 0 ? 1 : 0.5;
+		points.push({
+			x: centerX + Math.cos(angle) * radiusX * radius,
+			y: centerY + Math.sin(angle) * radiusY * radius,
+		});
+	}
+
+	return points;
+}
+
+/** Parametric heart curve normalized into the drag rectangle. */
+function heartPoints(
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { x: number; y: number }[] {
+	const samples = 160;
+	const raw: { x: number; y: number }[] = [];
+	let rawMinX = Infinity;
+	let rawMaxX = -Infinity;
+	let rawMinY = Infinity;
+	let rawMaxY = -Infinity;
+
+	for (let index = 0; index < samples; index++) {
+		const angle = (index / samples) * Math.PI * 2;
+		const x = 16 * Math.sin(angle) ** 3;
+		const y =
+			13 * Math.cos(angle) -
+			5 * Math.cos(2 * angle) -
+			2 * Math.cos(3 * angle) -
+			Math.cos(4 * angle);
+		raw.push({ x, y });
+		rawMinX = Math.min(rawMinX, x);
+		rawMaxX = Math.max(rawMaxX, x);
+		rawMinY = Math.min(rawMinY, y);
+		rawMaxY = Math.max(rawMaxY, y);
+	}
+
+	const spanX = Math.max(1, rawMaxX - rawMinX);
+	const spanY = Math.max(1, rawMaxY - rawMinY);
+	const width = maxX - minX + 1;
+	const height = maxY - minY + 1;
+
+	return raw.map((point) => ({
+		x: minX + ((point.x - rawMinX) / spanX) * width,
+		// The parametric curve points up; canvas y increases downward.
+		y: minY + ((rawMaxY - point.y) / spanY) * height,
+	}));
+}
+
+/** Even-odd scanline fill sampled at pixel centers. */
+function polygonMask(
+	points: { x: number; y: number }[],
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { mask: Uint8Array; width: number; height: number } {
+	const width = Math.max(1, maxX - minX + 1);
+	const height = Math.max(1, maxY - minY + 1);
+	const mask = new Uint8Array(width * height);
+
+	for (let row = 0; row < height; row++) {
+		const scanY = minY + row + 0.5;
+		const crossings: number[] = [];
+
+		for (let index = 0; index < points.length; index++) {
+			const a = points[index]!;
+			const b = points[(index + 1) % points.length]!;
+			if ((a.y <= scanY && b.y > scanY) || (b.y <= scanY && a.y > scanY)) {
+				const t = (scanY - a.y) / (b.y - a.y);
+				crossings.push(a.x + t * (b.x - a.x));
+			}
+		}
+
+		crossings.sort((a, b) => a - b);
+		for (let index = 0; index + 1 < crossings.length; index += 2) {
+			const start = Math.max(0, Math.ceil(crossings[index]! - 0.5) - minX);
+			const end = Math.min(
+				width - 1,
+				Math.floor(crossings[index + 1]! - 0.5) - minX,
+			);
+			for (let column = start; column <= end; column++) {
+				mask[row * width + column] = 1;
+			}
+		}
+	}
+
+	return { mask, width, height };
+}
+
+/**
+ * Writes a polygon mask as either a solid fill or a one-pixel boundary. The
+ * boundary is extracted from the filled mask so small shapes stay closed.
+ */
+function plotPolygon(
+	points: { x: number; y: number }[],
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+	filled: boolean,
+	write: PixelWriter,
+): void {
+	const { mask, width, height } = polygonMask(points, minX, minY, maxX, maxY);
+	let wrote = false;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const index = y * width + x;
+			if (!mask[index]) continue;
+
+			if (!filled) {
+				const left = x === 0 || !mask[index - 1];
+				const right = x === width - 1 || !mask[index + 1];
+				const top = y === 0 || !mask[index - width];
+				const bottom = y === height - 1 || !mask[index + width];
+				if (!left && !right && !top && !bottom) continue;
+			}
+
+			write(minX + x, minY + y);
+			wrote = true;
+		}
+	}
+
+	// Degenerate drags can rasterize to an empty polygon; leave a single dot.
+	if (!wrote) write(Math.round((minX + maxX) / 2), Math.round((minY + maxY) / 2));
+}
+
+/** Draws a rectangle, ellipse, star, or heart between two drag points. */
+export function plotShape(
+	kind: ShapeKind,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	filled: boolean,
+	write: PixelWriter,
+): void {
+	if (kind === "rectangle") {
+		plotRectangle(x0, y0, x1, y1, filled, write);
+		return;
+	}
+	if (kind === "ellipse") {
+		plotEllipse(x0, y0, x1, y1, filled, write);
+		return;
+	}
+
+	const minX = Math.min(x0, x1);
+	const maxX = Math.max(x0, x1);
+	const minY = Math.min(y0, y1);
+	const maxY = Math.max(y0, y1);
+	const points =
+		kind === "star"
+			? starPoints(minX, minY, maxX, maxY)
+			: heartPoints(minX, minY, maxX, maxY);
+
+	plotPolygon(points, minX, minY, maxX, maxY, filled, write);
+}
+
 function colorMatches(a: number, b: number, tolerance: number): boolean {
 	if (tolerance <= 0) return a === b;
 	const ar = a & 0xff;
@@ -286,6 +467,117 @@ function colorMatches(a: number, b: number, tolerance: number): boolean {
 		Math.abs(ab - bb) <= tolerance &&
 		Math.abs(aa - ba) <= tolerance
 	);
+}
+
+interface BayerPattern {
+	size: number;
+	mask: number;
+	shift: number;
+	thresholds: Float32Array;
+}
+
+function bayerThresholds(values: number[], size: number): Float32Array {
+	const total = size * size;
+	return new Float32Array(values.map((value) => (value + 0.5) / total));
+}
+
+const BAYER_PATTERNS: Record<Exclude<GradientDither, "none">, BayerPattern> = {
+	bayer2: {
+		size: 2,
+		mask: 1,
+		shift: 1,
+		thresholds: bayerThresholds([0, 2, 3, 1], 2),
+	},
+	bayer4: {
+		size: 4,
+		mask: 3,
+		shift: 2,
+		thresholds: bayerThresholds(
+			[
+				0, 8, 2, 10,
+				12, 4, 14, 6,
+				3, 11, 1, 9,
+				15, 7, 13, 5,
+			],
+			4,
+		),
+	},
+	bayer8: {
+		size: 8,
+		mask: 7,
+		shift: 3,
+		thresholds: bayerThresholds(
+			[
+				0, 32, 8, 40, 2, 34, 10, 42,
+				48, 16, 56, 24, 50, 18, 58, 26,
+				12, 44, 4, 36, 14, 46, 6, 38,
+				60, 28, 52, 20, 62, 30, 54, 22,
+				3, 35, 11, 43, 1, 33, 9, 41,
+				51, 19, 59, 27, 49, 17, 57, 25,
+				15, 47, 7, 39, 13, 45, 5, 37,
+				63, 31, 55, 23, 61, 29, 53, 21,
+			],
+			8,
+		),
+	},
+};
+
+/**
+ * Builds the same region a fill would affect: a matching connected area, or
+ * every matching pixel when `contiguous` is false.
+ */
+function matchingRegionMask(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	tolerance: number,
+	contiguous: boolean,
+	clip: Uint8Array | null,
+	lockAlpha: boolean,
+): Uint8Array | null {
+	if (x < 0 || x >= width || y < 0 || y >= height) return null;
+
+	const startIndex = y * width + x;
+	if (clip && !clip[startIndex]) return null;
+	if (lockAlpha && (cel[startIndex]! >>> 24) === 0) return null;
+
+	const target = cel[startIndex]!;
+	const mask = new Uint8Array(width * height);
+
+	if (!contiguous) {
+		for (let index = 0; index < cel.length; index++) {
+			if (clip && !clip[index]) continue;
+			if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
+			if (colorMatches(cel[index]!, target, tolerance)) mask[index] = 1;
+		}
+		return mask;
+	}
+
+	const visited = new Uint8Array(width * height);
+	const stack: number[] = [startIndex];
+
+	while (stack.length > 0) {
+		const index = stack.pop()!;
+		if (visited[index]) continue;
+		visited[index] = 1;
+		if (clip && !clip[index]) continue;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
+		if (!colorMatches(cel[index]!, target, tolerance)) continue;
+
+		mask[index] = 1;
+
+		const px = index % width;
+		const py = (index - px) / width;
+
+		if (px > 0) stack.push(index - 1);
+		if (px < width - 1) stack.push(index + 1);
+		if (py > 0) stack.push(index - width);
+		if (py < height - 1) stack.push(index + width);
+	}
+
+	return mask;
 }
 
 /** Flood fill (contiguous) or global replace (non-contiguous). */
@@ -310,42 +602,125 @@ export function fillPixels(
 	const target = cel[startIndex];
 	if (target === color) return false;
 
+	const mask = matchingRegionMask(
+		cel,
+		width,
+		height,
+		x,
+		y,
+		tolerance,
+		contiguous,
+		clip,
+		lockAlpha,
+	);
+	if (!mask) return false;
+
 	let changed = false;
-
-	if (!contiguous) {
-		for (let i = 0; i < cel.length; i++) {
-			if (clip && !clip[i]) continue;
-			if (lockAlpha && (cel[i]! >>> 24) === 0) continue;
-			if (colorMatches(cel[i]!, target!, tolerance)) {
-				cel[i] = color;
-				changed = true;
-			}
-		}
-		return changed;
-	}
-
-	const visited = new Uint8Array(width * height);
-	const stack: number[] = [startIndex];
-
-	while (stack.length > 0) {
-		const index = stack.pop()!;
-		if (visited[index]) continue;
-		visited[index] = 1;
-		if (clip && !clip[index]) continue;
-		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
-
-		if (!colorMatches(cel[index], target, tolerance)) continue;
-
+	for (let index = 0; index < mask.length; index++) {
+		if (!mask[index] || cel[index] === color) continue;
 		cel[index] = color;
 		changed = true;
+	}
+	return changed;
+}
 
-		const px = index % width;
-		const py = (index - px) / width;
+function lerpPackedColor(from: number, to: number, amount: number): number {
+	const fromRed = from & 0xff;
+	const fromGreen = (from >>> 8) & 0xff;
+	const fromBlue = (from >>> 16) & 0xff;
+	const fromAlpha = from >>> 24;
+	const toRed = to & 0xff;
+	const toGreen = (to >>> 8) & 0xff;
+	const toBlue = (to >>> 16) & 0xff;
+	const toAlpha = to >>> 24;
 
-		if (px > 0) stack.push(index - 1);
-		if (px < width - 1) stack.push(index + 1);
-		if (py > 0) stack.push(index - width);
-		if (py < height - 1) stack.push(index + width);
+	const red = Math.round(fromRed + (toRed - fromRed) * amount);
+	const green = Math.round(fromGreen + (toGreen - fromGreen) * amount);
+	const blue = Math.round(fromBlue + (toBlue - fromBlue) * amount);
+	const alpha = Math.round(fromAlpha + (toAlpha - fromAlpha) * amount);
+
+	return (
+		(((alpha & 0xff) << 24) |
+			((blue & 0xff) << 16) |
+			((green & 0xff) << 8) |
+			(red & 0xff)) >>>
+		0
+	);
+}
+
+/**
+ * Applies a linear or radial gradient between two colors inside the region a
+ * fill would affect at the start point. Bayer dithering picks one endpoint per
+ * pixel, while `none` blends the endpoints continuously.
+ */
+export function gradientPixels(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+	startColor: number,
+	endColor: number,
+	tolerance: number,
+	contiguous: boolean,
+	shape: GradientShape,
+	dither: GradientDither,
+	clip: Uint8Array | null = null,
+	lockAlpha = false,
+): boolean {
+	const deltaX = endX - startX;
+	const deltaY = endY - startY;
+	const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+	if (lengthSquared === 0) return false;
+
+	const mask = matchingRegionMask(
+		cel,
+		width,
+		height,
+		startX,
+		startY,
+		tolerance,
+		contiguous,
+		clip,
+		lockAlpha,
+	);
+	if (!mask) return false;
+
+	const radius = Math.sqrt(lengthSquared);
+	const pattern = dither === "none" ? null : BAYER_PATTERNS[dither];
+	let changed = false;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const index = y * width + x;
+			if (!mask[index]) continue;
+
+			let amount: number;
+			if (shape === "linear") {
+				amount =
+					((x - startX) * deltaX + (y - startY) * deltaY) / lengthSquared;
+			} else {
+				amount = Math.hypot(x - startX, y - startY) / radius;
+			}
+			amount = Math.max(0, Math.min(1, amount));
+
+			let next: number;
+			if (pattern) {
+				const threshold =
+					pattern.thresholds[
+						((y & pattern.mask) << pattern.shift) + (x & pattern.mask)
+					]!;
+				next = amount > threshold ? endColor : startColor;
+			} else {
+				next = lerpPackedColor(startColor, endColor, amount);
+			}
+
+			if (cel[index] === next) continue;
+			cel[index] = next;
+			changed = true;
+		}
 	}
 
 	return changed;

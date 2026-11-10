@@ -1,5 +1,5 @@
-import { plotEllipse, plotLine } from "./draw.js";
-import type { Point } from "./types.js";
+import { plotLine, plotShape } from "./draw.js";
+import type { Point, ShapeKind } from "./types.js";
 
 function clampToDoc(value: number, size: number): number {
 	return Math.max(0, Math.min(size - 1, value));
@@ -12,6 +12,13 @@ function hasAny(mask: Uint8Array): boolean {
 	return false;
 }
 
+export interface SelectionBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
 export function isSelectionPoint(
 	mask: Uint8Array | null,
 	width: number,
@@ -20,28 +27,35 @@ export function isSelectionPoint(
 	return !!mask && mask[point.y * width + point.x] === 1;
 }
 
-export function rectSelectionMask(
-	x0: number,
-	y0: number,
-	x1: number,
-	y1: number,
+/** Tight bounding box around the selected pixels, or null for an empty mask. */
+export function selectionBounds(
+	mask: Uint8Array | null,
 	width: number,
 	height: number,
-): Uint8Array {
-	const mask = new Uint8Array(width * height);
-	const minX = clampToDoc(Math.min(x0, x1), width);
-	const maxX = clampToDoc(Math.max(x0, x1), width);
-	const minY = clampToDoc(Math.min(y0, y1), height);
-	const maxY = clampToDoc(Math.max(y0, y1), height);
+): SelectionBounds | null {
+	if (!mask) return null;
 
-	for (let y = minY; y <= maxY; y++) {
-		const row = y * width;
-		for (let x = minX; x <= maxX; x++) mask[row + x] = 1;
+	let minX = width;
+	let minY = height;
+	let maxX = -1;
+	let maxY = -1;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			if (!mask[y * width + x]) continue;
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+		}
 	}
-	return mask;
+
+	if (maxX < minX || maxY < minY) return null;
+	return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
-export function ellipseSelectionMask(
+export function shapeSelectionMask(
+	kind: ShapeKind,
 	x0: number,
 	y0: number,
 	x1: number,
@@ -55,7 +69,7 @@ export function ellipseSelectionMask(
 	const minY = clampToDoc(Math.min(y0, y1), height);
 	const maxY = clampToDoc(Math.max(y0, y1), height);
 
-	plotEllipse(minX, minY, maxX, maxY, true, (x, y) => {
+	plotShape(kind, minX, minY, maxX, maxY, true, (x, y) => {
 		if (x >= 0 && x < width && y >= 0 && y < height) mask[y * width + x] = 1;
 	});
 	return mask;
