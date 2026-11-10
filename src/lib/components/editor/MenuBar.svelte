@@ -2,6 +2,7 @@
 	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
 	import Copy from "@lucide/svelte/icons/copy";
 	import Eraser from "@lucide/svelte/icons/eraser";
+	import FileInput from "@lucide/svelte/icons/file-input";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
 	import FlipHorizontal2 from "@lucide/svelte/icons/flip-horizontal-2";
 	import FlipVertical2 from "@lucide/svelte/icons/flip-vertical-2";
@@ -37,10 +38,12 @@
 
 	let {
 		onNew,
+		onImport,
 		onShortcuts,
 		onAbout,
 	}: {
 		onNew: () => void;
+		onImport: () => void;
 		onShortcuts: () => void;
 		onAbout: () => void;
 	} = $props();
@@ -103,6 +106,10 @@
 				<DropdownMenu.Item onSelect={openProject}>
 					<FolderOpen class="size-4" />
 					Open project…
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={onImport}>
+					<FileInput class="size-4" />
+					Import…
 				</DropdownMenu.Item>
 				<DropdownMenu.Item onSelect={() => editor.saveToFile()}>
 					<Save class="size-4" />

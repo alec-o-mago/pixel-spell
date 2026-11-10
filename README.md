@@ -18,6 +18,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
 - **Multiple projects** — open several projects in tabs above the canvas. New projects can be named and started with a transparent, white, or black background. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
+- **File import** — use **File → Import…** or drag and drop a file anywhere to open the import dialog. Common images (PNG, JPEG, GIF, WebP, BMP, AVIF, ICO, SVG) can become new projects; images larger than 1024 × 1024 are cropped to the top-left corner. PNGs can also contribute a palette built from their unique colors, and JASC `.pal`, GIMP `.gpl`, and `.hex` palettes import directly. Palettes are capped at 256 colors and previewed before import.
 - **Projects** — save and open portable `.pixelspell` files; opened files get their own tab.
 - **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, pixel grid, and a live cursor preview. A compact menu-bar readout shows the canvas size, last cursor coordinate, current frame, and active layer.
 - **Preview window** — a 1× copy of the active frame floats in the upper-right of the canvas stage. Close it to leave a circular scan-eye button; toggle it from **View → Show preview**. The preview updates while the animation plays.
@@ -104,6 +105,7 @@ src/
         ├── render.ts           # Canvas and thumbnail rendering helpers
         ├── color.ts            # Packed RGBA and hex color utilities
         ├── file.ts             # PNG export and project serialization
+        ├── import.ts           # Image/palette import parsing and analysis
         ├── palette.ts          # Default palette and palette persistence
         └── tools.ts            # Tool metadata and shortcuts
 ```
@@ -129,6 +131,7 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Open project tabs are kept in memory; reloading the page starts with a single new `Untitled` project.
 - Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
 - **File → New sprite** and **File → Open project** create new tabs; **File → Save project** saves the active project.
+- **File → Import…** opens a file picker, and dropping a file anywhere in the app opens the same import dialog. Images become unsaved project tabs; palettes are added to the workspace palette collection.
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
 - Custom color palettes and the active palette selection are saved in `localStorage`; the built-in palette is recreated on load and cannot be edited.
 - Layer visibility and opacity are document-wide rather than per-frame.

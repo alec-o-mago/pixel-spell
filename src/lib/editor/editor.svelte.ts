@@ -713,6 +713,38 @@ export class EditorState {
 		this.#persistPalettes();
 	}
 
+	/** Adds an imported palette, makes it active, and returns its id. */
+	importPalette(name: string, colors: string[]): string | null {
+		const unique: string[] = [];
+		for (const color of colors) {
+			const normalized = normalizeHex(color);
+			if (!normalized || unique.includes(normalized)) continue;
+			unique.push(normalized);
+			if (unique.length >= MAX_PALETTE_COLORS) break;
+		}
+		if (unique.length === 0) return null;
+
+		const baseName = (name.trim() || "Imported palette").slice(0, 40);
+		const usedNames = new Set(this.palettes.map((palette) => palette.name.toLowerCase()));
+		let paletteName = baseName;
+		let suffixIndex = 2;
+		while (usedNames.has(paletteName.toLowerCase())) {
+			const suffix = ` (${suffixIndex})`;
+			paletteName = `${baseName.slice(0, Math.max(1, 40 - suffix.length))}${suffix}`;
+			suffixIndex++;
+		}
+
+		const palette: Palette = {
+			id: uid("palette"),
+			name: paletteName,
+			colors: unique,
+		};
+		this.palettes.push(palette);
+		this.activePaletteId = palette.id;
+		this.#persistPalettes();
+		return palette.id;
+	}
+
 	toggleTheme(): void {
 		this.theme = this.theme === "dark" ? "light" : "dark";
 	}
@@ -941,6 +973,55 @@ export class EditorState {
 			redo: [],
 		});
 		this.projects.push({ id, name, dirty: false, modified: true });
+		this.#activateProject(id);
+	}
+
+	/** Creates a new, unsaved project tab from an imported image. */
+	importImageProject(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		const width = clamp(Math.round(image.width) || 1, MIN_SIZE, MAX_SIZE);
+		const height = clamp(Math.round(image.height) || 1, MIN_SIZE, MAX_SIZE);
+		const pixels = new Uint32Array(width * height);
+		pixels.set(image.pixels.subarray(0, Math.min(image.pixels.length, pixels.length)));
+
+		const doc: PixelDoc = {
+			width,
+			height,
+			fps: 12,
+			frames: [{ id: uid("frame") }],
+			layers: [
+				{
+					id: uid("layer"),
+					name: "Imported image",
+					visible: true,
+					locked: false,
+					opacity: 1,
+					cels: [pixels],
+				},
+			],
+		};
+
+		const requestedName = image.name.trim().slice(0, 60);
+		const name = requestedName || this.#nextUntitledName();
+
+		this.#syncActiveProject();
+		const id = uid("project");
+		this.#states.set(id, {
+			doc,
+			activeLayerId: doc.layers[0]!.id,
+			activeFrame: 0,
+			zoom: null,
+			panX: 0,
+			panY: 0,
+			selection: null,
+			undo: [],
+			redo: [],
+		});
+		this.projects.push({ id, name, dirty: true, modified: true });
 		this.#activateProject(id);
 	}
 

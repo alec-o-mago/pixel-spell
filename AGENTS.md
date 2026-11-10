@@ -44,6 +44,7 @@ Key files:
 | `lib/editor/render.ts` | Canvas scaling and thumbnail rendering |
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | PNG/sprite-sheet export, project save/parse |
+| `lib/editor/import.ts` | Image decoding, palette parsing, and import analysis |
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Built-in palette, palette type, and localStorage persistence |
 | `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
