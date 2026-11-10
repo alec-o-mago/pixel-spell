@@ -16,7 +16,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
 - **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, and hex input. The color panel supports multiple palettes: the built-in 32-color palette is read-only, while custom palettes can be created, renamed, deleted, and hold up to 256 colors. The palette header's `+` and `−` buttons add the current color or remove the last color, and the palette button creates a new palette. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them. Custom palettes are persisted in `localStorage`.
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
-- **Export** — current frame as PNG, or every frame as a horizontal sprite sheet.
+- **Export** — one dialog for image, sprite sheet, and GIF output. Export the current or chosen frame as PNG, WebP, or JPEG; build horizontal, vertical, or grid sprite sheets with configurable spacing; or render an animated GIF with adjustable frame rate, looping, and transparency. Every mode supports 1×–10× scaling and background choices, with live previews and size warnings.
 - **Multiple projects** — open several projects in tabs above the canvas. New projects can be named and started with a transparent, white, or black background. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
 - **File import** — use **File → Import…** or drag and drop a file anywhere to open the import dialog. Common images (PNG, JPEG, GIF, WebP, BMP, AVIF, ICO, SVG) can become new projects; images larger than 1024 × 1024 are cropped to the top-left corner. PNGs can also contribute a palette built from their unique colors, and JASC `.pal`, GIMP `.gpl`, and `.hex` palettes import directly. Palettes are capped at 256 colors and previewed before import.
 - **Projects** — save and open portable `.pixelspell` files; opened files get their own tab.
@@ -104,8 +104,9 @@ src/
         ├── draw.ts             # Brush, line, shape, and fill algorithms
         ├── render.ts           # Canvas and thumbnail rendering helpers
         ├── color.ts            # Packed RGBA and hex color utilities
-        ├── file.ts             # PNG export and project serialization
+        ├── file.ts             # Project serialization and save helpers
         ├── import.ts           # Image/palette import parsing and analysis
+        ├── export.ts           # Image, sprite sheet, and GIF export encoding
         ├── palette.ts          # Default palette and palette persistence
         └── tools.ts            # Tool metadata and shortcuts
 ```
@@ -132,6 +133,7 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
 - **File → New sprite** and **File → Open project** create new tabs; **File → Save project** saves the active project.
 - **File → Import…** opens a file picker, and dropping a file anywhere in the app opens the same import dialog. Images become unsaved project tabs; palettes are added to the workspace palette collection.
+- **File → Export…** opens the export dialog for images, sprite sheets, and animated GIFs. Outputs are generated locally and downloaded by the browser.
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
 - Custom color palettes and the active palette selection are saved in `localStorage`; the built-in palette is recreated on load and cannot be edited.
 - Layer visibility and opacity are document-wide rather than per-frame.

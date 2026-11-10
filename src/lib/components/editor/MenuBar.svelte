@@ -2,14 +2,13 @@
 	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
 	import Copy from "@lucide/svelte/icons/copy";
 	import Eraser from "@lucide/svelte/icons/eraser";
+	import FileDown from "@lucide/svelte/icons/file-down";
 	import FileInput from "@lucide/svelte/icons/file-input";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
 	import FlipHorizontal2 from "@lucide/svelte/icons/flip-horizontal-2";
 	import FlipVertical2 from "@lucide/svelte/icons/flip-vertical-2";
 	import FolderOpen from "@lucide/svelte/icons/folder-open";
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
-	import ImageDown from "@lucide/svelte/icons/image-down";
-	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
 	import LineSquiggle from "@lucide/svelte/icons/line-squiggle";
@@ -29,21 +28,19 @@
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-	import {
-		exportFramePng,
-		exportSpriteSheetPng,
-		readProjectFile,
-	} from "$lib/editor/file.js";
+	import { readProjectFile } from "$lib/editor/file.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 
 	let {
 		onNew,
 		onImport,
+		onExport,
 		onShortcuts,
 		onAbout,
 	}: {
 		onNew: () => void;
 		onImport: () => void;
+		onExport: () => void;
 		onShortcuts: () => void;
 		onAbout: () => void;
 	} = $props();
@@ -71,14 +68,6 @@
 			return;
 		}
 		editor.openProject(project);
-	}
-
-	function exportPng(): void {
-		exportFramePng(editor.doc, editor.activeFrame, editor.name);
-	}
-
-	function exportSheet(): void {
-		exportSpriteSheetPng(editor.doc, editor.name);
 	}
 </script>
 
@@ -117,13 +106,9 @@
 					<DropdownMenu.Shortcut>Ctrl S</DropdownMenu.Shortcut>
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
-				<DropdownMenu.Item onSelect={exportPng}>
-					<ImageDown class="size-4" />
-					Export PNG
-				</DropdownMenu.Item>
-				<DropdownMenu.Item onSelect={exportSheet}>
-					<Images class="size-4" />
-					Export sprite sheet
+				<DropdownMenu.Item onSelect={onExport}>
+					<FileDown class="size-4" />
+					Export…
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

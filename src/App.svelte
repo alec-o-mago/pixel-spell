@@ -2,6 +2,7 @@
 	import FileUp from "@lucide/svelte/icons/file-up";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import AboutDialog from "$lib/components/editor/AboutDialog.svelte";
+	import ExportDialog from "$lib/components/editor/ExportDialog.svelte";
 	import ImportDialog from "$lib/components/editor/ImportDialog.svelte";
 	import TimelineDock from "$lib/components/editor/TimelineDock.svelte";
 	import CanvasStage from "$lib/components/editor/CanvasStage.svelte";
@@ -19,6 +20,7 @@
 	let shortcutsOpen = $state(false);
 	let aboutOpen = $state(false);
 	let importDialogOpen = $state(false);
+	let exportDialogOpen = $state(false);
 	let importFile = $state<File | null>(null);
 	let importInput: HTMLInputElement | undefined;
 	let draggingFile = $state(false);
@@ -206,6 +208,7 @@
 		<MenuBar
 			onNew={() => (newDialogOpen = true)}
 			onImport={openImportPicker}
+			onExport={() => (exportDialogOpen = true)}
 			onShortcuts={() => (shortcutsOpen = true)}
 			onAbout={() => (aboutOpen = true)}
 		/>
@@ -226,6 +229,7 @@
 	<ShortcutsDialog bind:open={shortcutsOpen} />
 	<AboutDialog bind:open={aboutOpen} />
 	<ImportDialog bind:open={importDialogOpen} file={importFile} />
+	<ExportDialog bind:open={exportDialogOpen} />
 
 	{#if draggingFile}
 		<div

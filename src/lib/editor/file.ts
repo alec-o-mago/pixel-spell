@@ -1,6 +1,5 @@
 import { normalizeHex } from "./color.js";
-import { compositeFrame, uid } from "./doc.js";
-import { pixelsToImageData } from "./render.js";
+import { uid } from "./doc.js";
 import type { Layer, PixelDoc } from "./types.js";
 
 interface SerializedLayer {
@@ -67,56 +66,13 @@ function download(filename: string, url: string): void {
 	link.click();
 }
 
-function fileBase(name: string): string {
+export function fileBase(name: string): string {
 	const slug = name
 		.trim()
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "");
 	return slug || "pixel-spell";
-}
-
-function pixelsToPngUrl(
-	pixels: Uint32Array,
-	width: number,
-	height: number,
-): string {
-	const canvas = document.createElement("canvas");
-	canvas.width = width;
-	canvas.height = height;
-	const context = canvas.getContext("2d");
-	if (!context) throw new Error("Canvas 2D is not available");
-	context.putImageData(pixelsToImageData(pixels, width, height), 0, 0);
-	return canvas.toDataURL("image/png");
-}
-
-export function exportFramePng(doc: PixelDoc, frameIndex: number, name: string): void {
-	const pixels = compositeFrame(doc, frameIndex);
-	download(
-		`${fileBase(name)}-frame-${frameIndex + 1}.png`,
-		pixelsToPngUrl(pixels, doc.width, doc.height),
-	);
-}
-
-export function exportSpriteSheetPng(doc: PixelDoc, name: string): void {
-	const frames = doc.frames.length;
-	const sheetWidth = doc.width * frames;
-	const sheetHeight = doc.height;
-	const sheet = new Uint32Array(sheetWidth * sheetHeight);
-
-	for (let frame = 0; frame < frames; frame++) {
-		const pixels = compositeFrame(doc, frame);
-		for (let y = 0; y < doc.height; y++) {
-			const sourceOffset = y * doc.width;
-			const targetOffset = y * sheetWidth + frame * doc.width;
-			sheet.set(pixels.subarray(sourceOffset, sourceOffset + doc.width), targetOffset);
-		}
-	}
-
-	download(
-		`${fileBase(name)}-spritesheet.png`,
-		pixelsToPngUrl(sheet, sheetWidth, sheetHeight),
-	);
 }
 
 export function serializeProject(
