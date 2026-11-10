@@ -50,6 +50,7 @@ interface ProjectSnapshot {
 	zoom: number | null;
 	panX: number;
 	panY: number;
+	rotation: number;
 	selection: Uint8Array | null;
 	undo: PixelDoc[];
 	redo: PixelDoc[];
@@ -136,11 +137,14 @@ export class EditorState {
 	floating = $state<FloatingSelection | null>(null);
 
 	showGrid = $state(true);
+	gridSize = $state(1);
 	showPreview = $state(false);
 	zoom = $state<number | null>(null);
 	/** Canvas center offset from the stage center, in screen pixels. */
 	panX = $state(0);
 	panY = $state(0);
+	/** Canvas rotation in degrees, always a multiple of 15. */
+	rotation = $state(0);
 	viewport = $state<ViewportSize>({ w: 0, h: 0 });
 	playing = $state(false);
 	theme = $state<"light" | "dark">(readStoredTheme());
@@ -184,6 +188,7 @@ export class EditorState {
 			zoom: this.zoom,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -277,8 +282,13 @@ export class EditorState {
 	get fitZoom(): number {
 		const availableWidth = Math.max(0, this.viewport.w - 64);
 		const availableHeight = Math.max(0, this.viewport.h - 112);
+		const radians = (this.rotation * Math.PI) / 180;
+		const cosine = Math.abs(Math.cos(radians));
+		const sine = Math.abs(Math.sin(radians));
+		const rotatedWidth = this.doc.width * cosine + this.doc.height * sine;
+		const rotatedHeight = this.doc.width * sine + this.doc.height * cosine;
 		const fit = Math.floor(
-			Math.min(availableWidth / this.doc.width, availableHeight / this.doc.height),
+			Math.min(availableWidth / rotatedWidth, availableHeight / rotatedHeight),
 		);
 		return clamp(Number.isFinite(fit) ? fit : 1, MIN_ZOOM, MAX_ZOOM);
 	}
@@ -763,6 +773,22 @@ export class EditorState {
 		this.zoom = clamp(this.effectiveZoom - 1, MIN_ZOOM, MAX_ZOOM);
 	}
 
+	setGridSize(size: number): void {
+		if (!Number.isFinite(size)) return;
+		this.gridSize = clamp(Math.round(size), 1, 64);
+	}
+
+	setRotation(degrees: number): void {
+		if (!Number.isFinite(degrees)) return;
+		const snapped = Math.round(degrees / 15) * 15;
+		this.rotation = clamp(snapped, -180, 180);
+	}
+
+	rotateBy(degrees: number): void {
+		if (!Number.isFinite(degrees)) return;
+		this.rotation = clamp(this.rotation + degrees, -180, 180);
+	}
+
 	fitToWindow(): void {
 		this.zoom = null;
 		this.panX = 0;
@@ -841,6 +867,7 @@ export class EditorState {
 		snapshot.zoom = this.zoom;
 		snapshot.panX = this.panX;
 		snapshot.panY = this.panY;
+		snapshot.rotation = this.rotation;
 		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
@@ -858,6 +885,7 @@ export class EditorState {
 		this.zoom = snapshot.zoom;
 		this.panX = snapshot.panX;
 		this.panY = snapshot.panY;
+		this.rotation = snapshot.rotation;
 		this.floating = null;
 		this.selection = snapshot.selection;
 		this.selectionRevision++;
@@ -949,6 +977,7 @@ export class EditorState {
 			zoom: null,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -974,6 +1003,7 @@ export class EditorState {
 			zoom: null,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],
@@ -1023,6 +1053,7 @@ export class EditorState {
 			zoom: null,
 			panX: 0,
 			panY: 0,
+			rotation: 0,
 			selection: null,
 			undo: [],
 			redo: [],

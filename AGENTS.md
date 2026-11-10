@@ -75,7 +75,7 @@ Key files:
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
 - `newProject(width, height, { name, background })` and `openProject(loaded)` add a tab and activate it. `background` is `transparent`, `white`, or `black`; opaque backgrounds fill the initial layer and name it `Background`. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
-- Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
+- Undo/redo, zoom, pan, rotation, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.
 - **File → New project** and **File → Open project** create tabs; **File → Save project** saves the active project. The menu bar no longer shows the document name — the active tab does.
 
@@ -150,7 +150,7 @@ Menu bar (menus left, canvas/frame/layer readout centered, display toggles right
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
     ├── Project tab strip (project tabs, dirty dots, close buttons, new-project)
-    ├── Canvas (fit/zoom, grid, cursor, floating zoom pill, Preview window/scan-eye button in the top-right)
+    ├── Canvas (fit/rotation/zoom controls bottom right, grid controls bottom left, cursor, Preview window/scan-eye button in the top-right)
     ├── Resizable divider (drag, or focus and use ↑/↓)
     └── Timeline (Aseprite-style table: layer rows × frame columns, sticky headers, cel thumbnails, opacity footer)
 ```
@@ -176,7 +176,7 @@ Preserve these regions and their relative placement when making changes.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
 - `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
-- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center and translated by `editor.panX`/`editor.panY`, so panning works at every zoom level. Pointer coordinates still come from the canvas `getBoundingClientRect`, so the transform does not affect drawing. Middle-mouse drag pans regardless of the active tool. Pan is clamped so at least one sprite pixel stays visible, and a resize that invalidates the pan recenters the view. Zooming moves the view halfway from the current center toward the pointer. Mirror guides are drawn on a stage-sized overlay and can be dragged from anywhere on the stage, not just the canvas.
+- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Custom palettes are workspace preferences stored in `localStorage` under `pixel-spell-palettes`; the built-in palette always has id `default` and is never persisted or editable. Custom palettes are capped at 256 colors and new ones start empty.

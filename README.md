@@ -17,10 +17,10 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Color workflow** — separate primary (left mouse) and secondary (right mouse) colors with an always-visible saturation/brightness picker, hue and alpha sliders, and hex input. The color panel supports multiple palettes: the built-in 32-color palette is read-only, while custom palettes can be created, renamed, deleted, and hold up to 256 colors. The palette header's `+` and `−` buttons add the current color or remove the last color, and the palette button creates a new palette. Left-click a palette swatch to set the primary color; right-click to set the secondary. A swap button between the two swatches exchanges them. Custom palettes are persisted in `localStorage`.
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — one dialog for image, sprite sheet, and GIF output. Export the current or chosen frame as PNG, WebP, or JPEG; build horizontal, vertical, or grid sprite sheets with configurable spacing; or render an animated GIF with adjustable frame rate, looping, and transparency. Every mode supports 1×–10× scaling and background choices, with live previews and size warnings.
-- **Multiple projects** — open several projects in tabs above the canvas. New projects can be named and started with a transparent, white, or black background. Each tab keeps its own document, history, zoom, pan, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
+- **Multiple projects** — open several projects in tabs above the canvas. New projects can be named and started with a transparent, white, or black background. Each tab keeps its own document, history, zoom, pan, rotation, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
 - **File import** — use **File → Import…** or drag and drop a file anywhere to open the import dialog. Common images (PNG, JPEG, GIF, WebP, BMP, AVIF, ICO, SVG) can become new projects; images larger than 1024 × 1024 are cropped to the top-left corner. PNGs can also contribute a palette built from their unique colors, and JASC `.pal`, GIMP `.gpl`, and `.hex` palettes import directly. Palettes are capped at 256 colors and previewed before import.
 - **Projects** — save and open portable `.pixelspell` files; opened files get their own tab.
-- **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, pixel grid, and a live cursor preview. A compact menu-bar readout shows the canvas size, last cursor coordinate, current frame, and active layer.
+- **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, canvas rotation from −180° to +180° in 15° steps, preset grid sizes from 1×1 to 64×64, and a live cursor preview. The grid control sits at the bottom left of the canvas, while rotation and zoom controls sit at the bottom right. A compact menu-bar readout shows the canvas size, last cursor coordinate, current frame, and active layer.
 - **Preview window** — a 1× copy of the active frame floats in the upper-right of the canvas stage. Close it to leave a circular scan-eye button; toggle it from **View → Show preview**. The preview updates while the animation plays.
 - **Light and dark themes** with a sky-blue accent, persisted in `localStorage`.
 
@@ -78,7 +78,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Save project        | `Ctrl+S`                 |
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
-| Toggle pixel grid   | `Shift+G`                |
+| Toggle grid         | `Shift+G`                |
 | Select all          | `Ctrl+A`                 |
 | Copy selection      | `Ctrl+C`                 |
 | Paste selection     | `Ctrl+V`                 |
@@ -126,7 +126,7 @@ Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written 
 
 Project files store each cel as a base64 string, so they are portable between browsers and easy to inspect.
 
-Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, undo history, and dirty state. Tool, color, palette collection, theme, and timeline-height settings are shared across the workspace.
+Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, rotation, undo history, and dirty state. Tool, color, palette collection, theme, and timeline-height settings are shared across the workspace.
 
 ## Notes and limitations
 

@@ -1,6 +1,10 @@
 <script lang="ts">
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
+	import Minus from "@lucide/svelte/icons/minus";
+	import Plus from "@lucide/svelte/icons/plus";
+	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+	import RotateCw from "@lucide/svelte/icons/rotate-cw";
 	import ZoomIn from "@lucide/svelte/icons/zoom-in";
 	import ZoomOut from "@lucide/svelte/icons/zoom-out";
 	import { Button } from "$lib/components/ui/button/index.js";
@@ -32,6 +36,26 @@
 	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 	import Preview from "./Preview.svelte";
+
+	const ROTATION_OPTIONS = Array.from({ length: 25 }, (_, index) => -180 + index * 15);
+	const GRID_SIZES = [1, 2, 4, 8, 16, 32, 64];
+	const GRID_MIN = GRID_SIZES[0]!;
+	const GRID_MAX = GRID_SIZES[GRID_SIZES.length - 1]!;
+
+	function stepGridSize(direction: 1 | -1): void {
+		const current = GRID_SIZES.indexOf(editor.gridSize);
+		const index =
+			current >= 0
+				? current
+				: GRID_SIZES.findIndex((size) => size > editor.gridSize);
+		let nextIndex: number;
+		if (index < 0) {
+			nextIndex = GRID_SIZES.length - 1;
+		} else {
+			nextIndex = Math.max(0, Math.min(GRID_SIZES.length - 1, index + direction));
+		}
+		editor.setGridSize(GRID_SIZES[nextIndex]!);
+	}
 
 	let stage: HTMLDivElement | undefined;
 	let canvas: HTMLCanvasElement | undefined;
@@ -95,6 +119,7 @@
 	let zoom = $derived(editor.effectiveZoom);
 	let canvasWidth = $derived(editor.doc.width * zoom);
 	let canvasHeight = $derived(editor.doc.height * zoom);
+	let gridStep = $derived(zoom * editor.gridSize);
 	let isDrawable = $derived(
 		!!editor.activeLayer && !editor.activeLayer.locked && editor.activeLayer.visible,
 	);
@@ -220,6 +245,7 @@
 		editor.viewport;
 		editor.panX;
 		editor.panY;
+		editor.rotation;
 		zoom;
 		canvasWidth;
 		canvasHeight;
@@ -268,13 +294,35 @@
 		if (curvePhase !== "idle") resetCurveState(false);
 	});
 
-	function pixelFromEvent(event: PointerEvent, clampToCanvas = false): Point | null {
-		if (!canvas) return null;
-		const rect = canvas.getBoundingClientRect();
+	/** Maps a pointer event into unrotated canvas-local screen pixels. */
+	function pointerToLocalCanvas(event: {
+		clientX: number;
+		clientY: number;
+	}): { x: number; y: number } | null {
+		if (!stage) return null;
+		const rect = stage.getBoundingClientRect();
 		if (rect.width === 0 || rect.height === 0) return null;
 
-		let relativeX = (event.clientX - rect.left) / rect.width;
-		let relativeY = (event.clientY - rect.top) / rect.height;
+		const centerX = rect.left + rect.width / 2 + editor.panX;
+		const centerY = rect.top + rect.height / 2 + editor.panY;
+		const dx = event.clientX - centerX;
+		const dy = event.clientY - centerY;
+		const radians = (editor.rotation * Math.PI) / 180;
+		const cosine = Math.cos(radians);
+		const sine = Math.sin(radians);
+
+		return {
+			x: dx * cosine + dy * sine + canvasWidth / 2,
+			y: -dx * sine + dy * cosine + canvasHeight / 2,
+		};
+	}
+
+	function pixelFromEvent(event: PointerEvent, clampToCanvas = false): Point | null {
+		const local = pointerToLocalCanvas(event);
+		if (!local || canvasWidth <= 0 || canvasHeight <= 0) return null;
+
+		let relativeX = local.x / canvasWidth;
+		let relativeY = local.y / canvasHeight;
 
 		if (clampToCanvas) {
 			relativeX = Math.max(0, Math.min(0.999999, relativeX));
@@ -325,36 +373,29 @@
 	}
 
 	function mirrorAtEvent(event: PointerEvent): MirrorAxis | null {
-		if (!stage || !canvas) return null;
-
-		const stageRect = stage.getBoundingClientRect();
-		const rect = canvas.getBoundingClientRect();
-		if (stageRect.width === 0 || stageRect.height === 0) return null;
-		if (rect.width === 0 || rect.height === 0) return null;
+		const local = pointerToLocalCanvas(event);
+		if (!local || !stage) return null;
 
 		const width = editor.doc.width;
 		const height = editor.doc.height;
-		const pointerX = event.clientX - stageRect.left;
-		const pointerY = event.clientY - stageRect.top;
-		const left = rect.left - stageRect.left;
-		const top = rect.top - stageRect.top;
-		const zoomX = rect.width / width;
-		const zoomY = rect.height / height;
+		const scale = canvasWidth / width;
+		if (scale <= 0) return null;
+
 		let best: MirrorAxis | null = null;
 		let bestDistance = 6;
 
 		for (const axis of editor.mirrorAxes) {
 			let distance: number;
 			if (axis.kind === "x") {
-				distance = Math.abs(pointerY - (top + axis.position * zoomY));
+				distance = Math.abs(local.y - axis.position * scale);
 			} else if (axis.kind === "y") {
-				distance = Math.abs(pointerX - (left + axis.position * zoomX));
+				distance = Math.abs(local.x - axis.position * scale);
 			} else if (axis.kind === "diagonal-down") {
-				const offset = top - left + axis.position * zoomX;
-				distance = Math.abs(pointerY - pointerX - offset) / Math.SQRT2;
+				distance =
+					Math.abs(local.y - local.x - axis.position * scale) / Math.SQRT2;
 			} else {
-				const offset = left + top + axis.position * zoomX;
-				distance = Math.abs(pointerX + pointerY - offset) / Math.SQRT2;
+				distance =
+					Math.abs(local.x + local.y - axis.position * scale) / Math.SQRT2;
 			}
 
 			if (distance < bestDistance) {
@@ -367,12 +408,15 @@
 	}
 
 	function updateMirrorDrag(event: PointerEvent): void {
-		if (!draggingMirror || !canvas) return;
-		const rect = canvas.getBoundingClientRect();
-		if (rect.width === 0 || rect.height === 0) return;
+		if (!draggingMirror) return;
+		const local = pointerToLocalCanvas(event);
+		if (!local) return;
 
-		const boundaryX = ((event.clientX - rect.left) / rect.width) * editor.doc.width;
-		const boundaryY = ((event.clientY - rect.top) / rect.height) * editor.doc.height;
+		const scale = canvasWidth / editor.doc.width;
+		if (scale <= 0) return;
+
+		const boundaryX = local.x / scale;
+		const boundaryY = local.y / scale;
 		const snap = (value: number) => Math.round(value * 2) / 2;
 
 		if (draggingMirror === "x") {
@@ -736,15 +780,20 @@
 		const scale = editor.effectiveZoom;
 		const width = editor.doc.width * scale;
 		const height = editor.doc.height * scale;
+		const radians = (editor.rotation * Math.PI) / 180;
+		const cosine = Math.abs(Math.cos(radians));
+		const sine = Math.abs(Math.sin(radians));
+		const rotatedWidth = width * cosine + height * sine;
+		const rotatedHeight = width * sine + height * cosine;
 		// Keep at least one whole sprite pixel inside the stage on each axis.
-		const visibleX = Math.min(scale, width, viewport.w);
-		const visibleY = Math.min(scale, height, viewport.h);
+		const visibleX = Math.min(scale, rotatedWidth, viewport.w);
+		const visibleY = Math.min(scale, rotatedHeight, viewport.h);
 
 		return {
-			minX: visibleX - (viewport.w + width) / 2,
-			maxX: (viewport.w + width) / 2 - visibleX,
-			minY: visibleY - (viewport.h + height) / 2,
-			maxY: (viewport.h + height) / 2 - visibleY,
+			minX: visibleX - (viewport.w + rotatedWidth) / 2,
+			maxX: (viewport.w + rotatedWidth) / 2 - visibleX,
+			minY: visibleY - (viewport.h + rotatedHeight) / 2,
+			maxY: (viewport.h + rotatedHeight) / 2 - visibleY,
 		};
 	}
 
@@ -1098,7 +1147,7 @@
 
 	/** Draw mirror guides across the whole stage, not just over the sprite. */
 	function drawMirrorOverlay(): void {
-		if (!mirrorCanvas || !stage || !canvas) return;
+		if (!mirrorCanvas || !stage) return;
 
 		const stageRect = stage.getBoundingClientRect();
 		const width = Math.max(1, Math.round(stageRect.width));
@@ -1121,32 +1170,31 @@
 		const axes = editor.mirrorAxes;
 		if (axes.length === 0) return;
 
-		const rect = canvas.getBoundingClientRect();
-		const left = rect.left - stageRect.left;
-		const top = rect.top - stageRect.top;
-		const scale = rect.width / editor.doc.width;
+		const scale = editor.effectiveZoom;
+		const centerX = width / 2 + editor.panX;
+		const centerY = height / 2 + editor.panY;
+		const span = width + height + canvasWidth + canvasHeight;
 
 		context.setTransform(dpr, 0, 0, dpr, 0, 0);
+		context.translate(centerX, centerY);
+		context.rotate((editor.rotation * Math.PI) / 180);
+		context.translate(-canvasWidth / 2, -canvasHeight / 2);
 		context.beginPath();
+
 		for (const axis of axes) {
+			const offset = axis.position * scale;
 			if (axis.kind === "x") {
-				const y = top + axis.position * scale;
-				context.moveTo(0, y);
-				context.lineTo(width, y);
+				context.moveTo(-span, offset);
+				context.lineTo(span, offset);
 			} else if (axis.kind === "y") {
-				const x = left + axis.position * scale;
-				context.moveTo(x, 0);
-				context.lineTo(x, height);
+				context.moveTo(offset, -span);
+				context.lineTo(offset, span);
 			} else if (axis.kind === "diagonal-down") {
-				// In document space y - x = position; translate that to stage space.
-				const offset = top - left + axis.position * scale;
-				context.moveTo(0, offset);
-				context.lineTo(width, width + offset);
+				context.moveTo(-span, -span + offset);
+				context.lineTo(span, span + offset);
 			} else {
-				// In document space x + y = position; translate that to stage space.
-				const offset = left + top + axis.position * scale;
-				context.moveTo(0, offset);
-				context.lineTo(width, offset - width);
+				context.moveTo(-span, span + offset);
+				context.lineTo(span, -span + offset);
 			}
 		}
 
@@ -1617,7 +1665,7 @@
 			class="absolute left-1/2 top-1/2 shadow-xl ring-1 ring-border/70"
 			style:width={`${canvasWidth}px`}
 			style:height={`${canvasHeight}px`}
-			style:transform={`translate(calc(-50% + ${editor.panX}px), calc(-50% + ${editor.panY}px))`}
+			style:transform={`translate(calc(-50% + ${editor.panX}px), calc(-50% + ${editor.panY}px)) rotate(${editor.rotation}deg)`}
 		>
 			<div class="checkerboard checkerboard-lg absolute inset-0"></div>
 
@@ -1646,10 +1694,10 @@
 				aria-hidden="true"
 			></canvas>
 
-			{#if editor.showGrid && zoom >= 6}
+			{#if editor.showGrid && gridStep >= 6}
 				<div
 					class="pointer-events-none absolute inset-0"
-					style={`background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: ${zoom}px ${zoom}px;`}
+					style={`background-image: linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px); background-size: ${gridStep}px ${gridStep}px;`}
 				></div>
 			{/if}
 
@@ -1684,8 +1732,93 @@
 	<Preview />
 
 	<div
-		class="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background/90 p-1 shadow-sm backdrop-blur"
+		class="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-full border bg-background/90 p-1 shadow-sm backdrop-blur"
 	>
+		<Button
+			variant={editor.showGrid ? "secondary" : "ghost"}
+			size="icon-xs"
+			class="rounded-full text-muted-foreground"
+			onclick={() => (editor.showGrid = !editor.showGrid)}
+			title="Toggle grid"
+			aria-label="Toggle grid"
+			aria-pressed={editor.showGrid}
+		>
+			<Grid3x3 class="size-3.5" />
+		</Button>
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			class="rounded-full text-muted-foreground"
+			onclick={() => stepGridSize(-1)}
+			disabled={editor.gridSize <= GRID_MIN}
+			title="Decrease grid size"
+			aria-label="Decrease grid size"
+		>
+			<Minus class="size-3.5" />
+		</Button>
+		<select
+			class="h-6 cursor-pointer rounded-full bg-transparent px-1.5 font-mono text-[11px] tabular-nums text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+			value={editor.gridSize}
+			onchange={(event) =>
+				editor.setGridSize(Number((event.currentTarget as HTMLSelectElement).value))}
+			title="Grid size in document pixels"
+			aria-label="Grid size"
+		>
+			{#each GRID_SIZES as size (size)}
+				<option value={size}>{size}×{size}</option>
+			{/each}
+		</select>
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			class="rounded-full text-muted-foreground"
+			onclick={() => stepGridSize(1)}
+			disabled={editor.gridSize >= GRID_MAX}
+			title="Increase grid size"
+			aria-label="Increase grid size"
+		>
+			<Plus class="size-3.5" />
+		</Button>
+	</div>
+
+	<div
+		class="absolute bottom-3 right-3 flex items-center gap-0.5 rounded-full border bg-background/90 p-1 shadow-sm backdrop-blur"
+	>
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			class="rounded-full text-muted-foreground"
+			onclick={() => editor.rotateBy(-15)}
+			disabled={editor.rotation <= -180}
+			title="Rotate left 15°"
+			aria-label="Rotate left 15 degrees"
+		>
+			<RotateCcw class="size-3.5" />
+		</Button>
+		<select
+			class="h-6 min-w-14 cursor-pointer rounded-full bg-transparent px-1 font-mono text-[11px] tabular-nums text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+			value={editor.rotation}
+			onchange={(event) =>
+				editor.setRotation(Number((event.currentTarget as HTMLSelectElement).value))}
+			title="Canvas rotation"
+			aria-label="Canvas rotation"
+		>
+			{#each ROTATION_OPTIONS as angle (angle)}
+				<option value={angle}>{angle}°</option>
+			{/each}
+		</select>
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			class="rounded-full text-muted-foreground"
+			onclick={() => editor.rotateBy(15)}
+			disabled={editor.rotation >= 180}
+			title="Rotate right 15°"
+			aria-label="Rotate right 15 degrees"
+		>
+			<RotateCw class="size-3.5" />
+		</Button>
+		<Separator orientation="vertical" class="mx-1 h-4" />
 		<Button
 			variant="ghost"
 			size="icon-xs"
@@ -1714,7 +1847,6 @@
 		>
 			<ZoomIn class="size-3.5" />
 		</Button>
-		<Separator orientation="vertical" class="mx-1 h-4" />
 		<Button
 			variant="ghost"
 			size="icon-xs"
@@ -1724,17 +1856,6 @@
 			aria-label="Fit to window"
 		>
 			<Maximize2 class="size-3.5" />
-		</Button>
-		<Button
-			variant={editor.showGrid ? "secondary" : "ghost"}
-			size="icon-xs"
-			class="rounded-full text-muted-foreground"
-			onclick={() => (editor.showGrid = !editor.showGrid)}
-			title="Toggle pixel grid"
-			aria-label="Toggle pixel grid"
-			aria-pressed={editor.showGrid}
-		>
-			<Grid3x3 class="size-3.5" />
 		</Button>
 	</div>
 </section>
