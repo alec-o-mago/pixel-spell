@@ -1,4 +1,4 @@
-import type { MirrorAxis } from "./types.js";
+import type { MirrorAxis, ShapeKind } from "./types.js";
 
 export type PixelWriter = (x: number, y: number) => void;
 
@@ -268,6 +268,182 @@ export function plotEllipse(
 		previousRight = right;
 		hasPrevious = true;
 	}
+}
+
+/** Outline of a five-pointed star inscribed in the drag rectangle. */
+function starPoints(
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { x: number; y: number }[] {
+	const centerX = (minX + maxX + 1) / 2;
+	const centerY = (minY + maxY + 1) / 2;
+	const radiusX = (maxX - minX + 1) / 2;
+	const radiusY = (maxY - minY + 1) / 2;
+	const points: { x: number; y: number }[] = [];
+
+	for (let index = 0; index < 10; index++) {
+		const angle = -Math.PI / 2 + (index * Math.PI) / 5;
+		const radius = index % 2 === 0 ? 1 : 0.5;
+		points.push({
+			x: centerX + Math.cos(angle) * radiusX * radius,
+			y: centerY + Math.sin(angle) * radiusY * radius,
+		});
+	}
+
+	return points;
+}
+
+/** Parametric heart curve normalized into the drag rectangle. */
+function heartPoints(
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { x: number; y: number }[] {
+	const samples = 160;
+	const raw: { x: number; y: number }[] = [];
+	let rawMinX = Infinity;
+	let rawMaxX = -Infinity;
+	let rawMinY = Infinity;
+	let rawMaxY = -Infinity;
+
+	for (let index = 0; index < samples; index++) {
+		const angle = (index / samples) * Math.PI * 2;
+		const x = 16 * Math.sin(angle) ** 3;
+		const y =
+			13 * Math.cos(angle) -
+			5 * Math.cos(2 * angle) -
+			2 * Math.cos(3 * angle) -
+			Math.cos(4 * angle);
+		raw.push({ x, y });
+		rawMinX = Math.min(rawMinX, x);
+		rawMaxX = Math.max(rawMaxX, x);
+		rawMinY = Math.min(rawMinY, y);
+		rawMaxY = Math.max(rawMaxY, y);
+	}
+
+	const spanX = Math.max(1, rawMaxX - rawMinX);
+	const spanY = Math.max(1, rawMaxY - rawMinY);
+	const width = maxX - minX + 1;
+	const height = maxY - minY + 1;
+
+	return raw.map((point) => ({
+		x: minX + ((point.x - rawMinX) / spanX) * width,
+		// The parametric curve points up; canvas y increases downward.
+		y: minY + ((rawMaxY - point.y) / spanY) * height,
+	}));
+}
+
+/** Even-odd scanline fill sampled at pixel centers. */
+function polygonMask(
+	points: { x: number; y: number }[],
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+): { mask: Uint8Array; width: number; height: number } {
+	const width = Math.max(1, maxX - minX + 1);
+	const height = Math.max(1, maxY - minY + 1);
+	const mask = new Uint8Array(width * height);
+
+	for (let row = 0; row < height; row++) {
+		const scanY = minY + row + 0.5;
+		const crossings: number[] = [];
+
+		for (let index = 0; index < points.length; index++) {
+			const a = points[index]!;
+			const b = points[(index + 1) % points.length]!;
+			if ((a.y <= scanY && b.y > scanY) || (b.y <= scanY && a.y > scanY)) {
+				const t = (scanY - a.y) / (b.y - a.y);
+				crossings.push(a.x + t * (b.x - a.x));
+			}
+		}
+
+		crossings.sort((a, b) => a - b);
+		for (let index = 0; index + 1 < crossings.length; index += 2) {
+			const start = Math.max(0, Math.ceil(crossings[index]! - 0.5) - minX);
+			const end = Math.min(
+				width - 1,
+				Math.floor(crossings[index + 1]! - 0.5) - minX,
+			);
+			for (let column = start; column <= end; column++) {
+				mask[row * width + column] = 1;
+			}
+		}
+	}
+
+	return { mask, width, height };
+}
+
+/**
+ * Writes a polygon mask as either a solid fill or a one-pixel boundary. The
+ * boundary is extracted from the filled mask so small shapes stay closed.
+ */
+function plotPolygon(
+	points: { x: number; y: number }[],
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+	filled: boolean,
+	write: PixelWriter,
+): void {
+	const { mask, width, height } = polygonMask(points, minX, minY, maxX, maxY);
+	let wrote = false;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const index = y * width + x;
+			if (!mask[index]) continue;
+
+			if (!filled) {
+				const left = x === 0 || !mask[index - 1];
+				const right = x === width - 1 || !mask[index + 1];
+				const top = y === 0 || !mask[index - width];
+				const bottom = y === height - 1 || !mask[index + width];
+				if (!left && !right && !top && !bottom) continue;
+			}
+
+			write(minX + x, minY + y);
+			wrote = true;
+		}
+	}
+
+	// Degenerate drags can rasterize to an empty polygon; leave a single dot.
+	if (!wrote) write(Math.round((minX + maxX) / 2), Math.round((minY + maxY) / 2));
+}
+
+/** Draws a rectangle, ellipse, star, or heart between two drag points. */
+export function plotShape(
+	kind: ShapeKind,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+	filled: boolean,
+	write: PixelWriter,
+): void {
+	if (kind === "rectangle") {
+		plotRectangle(x0, y0, x1, y1, filled, write);
+		return;
+	}
+	if (kind === "ellipse") {
+		plotEllipse(x0, y0, x1, y1, filled, write);
+		return;
+	}
+
+	const minX = Math.min(x0, x1);
+	const maxX = Math.max(x0, x1);
+	const minY = Math.min(y0, y1);
+	const maxY = Math.max(y0, y1);
+	const points =
+		kind === "star"
+			? starPoints(minX, minY, maxX, maxY)
+			: heartPoints(minX, minY, maxX, maxY);
+
+	plotPolygon(points, minX, minY, maxX, maxY, filled, write);
 }
 
 function colorMatches(a: number, b: number, tolerance: number): boolean {

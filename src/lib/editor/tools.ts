@@ -27,16 +27,10 @@ export const TOOLS: ToolDef[] = [
 		shortcut: "W",
 	},
 	{
-		id: "rect-select",
-		label: "Rectangle select",
-		description: "Select a rectangular area",
+		id: "shape-select",
+		label: "Shape select",
+		description: "Select a rectangle, ellipse, star, or heart",
 		shortcut: "M",
-	},
-	{
-		id: "ellipse-select",
-		label: "Ellipse select",
-		description: "Select an elliptical area",
-		shortcut: "⇧M",
 	},
 	{
 		id: "lasso",
@@ -81,16 +75,10 @@ export const TOOLS: ToolDef[] = [
 		shortcut: "U",
 	},
 	{
-		id: "rectangle",
-		label: "Rectangle",
-		description: "Draw a rectangle or filled block",
+		id: "shape",
+		label: "Shape",
+		description: "Draw a rectangle, ellipse, star, or heart",
 		shortcut: "R",
-	},
-	{
-		id: "ellipse",
-		label: "Ellipse",
-		description: "Draw an ellipse or filled shape",
-		shortcut: "O",
 	},
 	{
 		id: "fill",
@@ -138,8 +126,7 @@ export const TOOL_SHIFT_SHORTCUTS = Object.fromEntries(
 
 const SELECTION_TOOL_IDS = new Set<ToolId>([
 	"magic-wand",
-	"rect-select",
-	"ellipse-select",
+	"shape-select",
 	"lasso",
 	"select-color",
 ]);

@@ -13,18 +13,16 @@
 		paintBrush,
 		paintPixel,
 		plotCubicCurve,
-		plotEllipse,
 		plotLine,
-		plotRectangle,
+		plotShape,
 		sprayPixels,
 	} from "$lib/editor/draw.js";
 	import {
 		colorSelectionMask,
-		ellipseSelectionMask,
 		isSelectionPoint,
 		lassoSelectionMask,
 		magicWandMask,
-		rectSelectionMask,
+		shapeSelectionMask,
 		unionSelectionMasks,
 	} from "$lib/editor/selection.js";
 	import { drawScaled, pixelsToImageData } from "$lib/editor/render.js";
@@ -68,7 +66,6 @@
 
 	let selecting = false;
 	let selectStart: Point | null = null;
-	let selectElliptical = false;
 	let selectAdditive = false;
 	let selectBaseMask: Uint8Array | null = null;
 
@@ -103,7 +100,7 @@
 			editor.tool === "eraser" ||
 			editor.tool === "line" ||
 			editor.tool === "curve" ||
-			((editor.tool === "rectangle" || editor.tool === "ellipse") && !editor.shapeFilled)
+			(editor.tool === "shape" && !editor.shapeFilled)
 			? editor.brushSize
 			: 1,
 	);
@@ -513,17 +510,9 @@
 
 		if (editor.tool === "line") {
 			plotLine(start.x, start.y, end.x, end.y, stroke);
-		} else if (editor.tool === "rectangle") {
-			plotRectangle(
-				start.x,
-				start.y,
-				end.x,
-				end.y,
-				editor.shapeFilled,
-				editor.shapeFilled ? dot : stroke,
-			);
-		} else if (editor.tool === "ellipse") {
-			plotEllipse(
+		} else if (editor.tool === "shape") {
+			plotShape(
+				editor.shapeKind,
 				start.x,
 				start.y,
 				end.x,
@@ -784,20 +773,19 @@
 		zoomAtPoint(event, direction);
 	}
 
-	function updateRectSelection(point: Point): void {
+	function updateShapeSelection(point: Point): void {
 		if (!selectStart) return;
 		const width = editor.doc.width;
 		const height = editor.doc.height;
-		const mask = selectElliptical
-			? ellipseSelectionMask(
-					selectStart.x,
-					selectStart.y,
-					point.x,
-					point.y,
-					width,
-					height,
-				)
-			: rectSelectionMask(selectStart.x, selectStart.y, point.x, point.y, width, height);
+		const mask = shapeSelectionMask(
+			editor.selectionShape,
+			selectStart.x,
+			selectStart.y,
+			point.x,
+			point.y,
+			width,
+			height,
+		);
 		editor.setSelection(
 			selectAdditive ? unionSelectionMasks(selectBaseMask, mask) : mask,
 		);
@@ -1223,13 +1211,12 @@
 				selectByColor(point, additive);
 				return;
 			}
-			if (tool === "rect-select" || tool === "ellipse-select") {
+			if (tool === "shape-select") {
 				selecting = true;
 				selectStart = point;
-				selectElliptical = tool === "ellipse-select";
 				selectAdditive = additive;
 				selectBaseMask = additive && editor.selection ? new Uint8Array(editor.selection) : null;
-				updateRectSelection(point);
+				updateShapeSelection(point);
 				return;
 			}
 			if (tool === "lasso") {
@@ -1358,7 +1345,7 @@
 			const point = pixelFromEvent(event, true);
 			if (point) {
 				setCursor(point);
-				updateRectSelection(point);
+				updateShapeSelection(point);
 			}
 			return;
 		}

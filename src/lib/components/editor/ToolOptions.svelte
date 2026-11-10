@@ -4,10 +4,11 @@
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import { TOOL_BY_ID } from "$lib/editor/tools.js";
+	import ShapePicker from "./ShapePicker.svelte";
 	import ToolIcon from "./ToolIcon.svelte";
 
 	let tool = $derived(TOOL_BY_ID[editor.tool]);
-	let isShape = $derived(editor.tool === "rectangle" || editor.tool === "ellipse");
+	let isShape = $derived(editor.tool === "shape");
 	let showSize = $derived(
 		editor.tool === "pencil" ||
 			editor.tool === "eraser" ||
@@ -73,14 +74,14 @@
 					<Switch bind:checked={editor.magicWandDiagonal} />
 				</label>
 				{@render deselectAction()}
-			{:else if editor.tool === "rect-select"}
+			{:else if editor.tool === "shape-select"}
+				<div class="space-y-2.5">
+					<span class="text-xs font-medium">Selection shape</span>
+					<ShapePicker bind:value={editor.selectionShape} />
+				</div>
 				<p class="text-[10px] leading-relaxed text-muted-foreground">
-					Selects a rectangular area. Drag inside an existing selection to move its pixels.
-				</p>
-				{@render deselectAction()}
-			{:else if editor.tool === "ellipse-select"}
-				<p class="text-[10px] leading-relaxed text-muted-foreground">
-					Selects an elliptical area. Drag inside an existing selection to move its pixels.
+					Drag to select a {editor.selectionShape}. Drag inside an existing selection to move
+					its pixels.
 				</p>
 				{@render deselectAction()}
 			{:else if editor.tool === "lasso"}
@@ -217,6 +218,13 @@
 					<Switch bind:checked={editor.fillContiguous} />
 				</label>
 			{:else}
+				{#if isShape}
+					<div class="space-y-2.5">
+						<span class="text-xs font-medium">Shape</span>
+						<ShapePicker bind:value={editor.shapeKind} />
+					</div>
+				{/if}
+
 				{#if showSize}
 					<div class="space-y-2.5">
 						<div class="flex items-center justify-between">

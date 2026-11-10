@@ -8,7 +8,7 @@
 	import ToolIcon from "./ToolIcon.svelte";
 
 	// Pan/zoom | selection tools | paint tools | fill/eyedropper | area tools
-	const SEPARATOR_BEFORE = new Set([2, 7, 14, 16]);
+	const SEPARATOR_BEFORE = new Set([2, 6, 12, 14]);
 </script>
 
 <aside

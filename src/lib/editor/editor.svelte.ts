@@ -18,6 +18,7 @@ import type {
 	PixelDoc,
 	Point,
 	ProjectTab,
+	ShapeKind,
 	ToolId,
 	ViewportSize,
 } from "./types.js";
@@ -111,6 +112,10 @@ export class EditorState {
 	lockAlpha = $state(false);
 	pixelPerfect = $state(false);
 	shapeFilled = $state(false);
+	/** Shape drawn by the combined shape tool. */
+	shapeKind = $state<ShapeKind>("rectangle");
+	/** Shape drawn by the combined selection tool. */
+	selectionShape = $state<ShapeKind>("rectangle");
 	fillTolerance = $state(0);
 	fillContiguous = $state(true);
 	sampleAllLayers = $state(true);

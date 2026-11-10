@@ -40,7 +40,7 @@ Key files:
 | `lib/editor/editor.svelte.ts` | Singleton `editor` state, history, layer/frame operations, zoom/theme |
 | `lib/editor/types.ts` | `PixelDoc`, `Layer`, `Frame`, `ToolId`, `Point` |
 | `lib/editor/doc.ts` | Document creation/cloning, layer compositing |
-| `lib/editor/draw.ts` | Brush, line, rectangle, ellipse, flood fill |
+| `lib/editor/draw.ts` | Brush, line, shapes (rectangle, ellipse, star, heart), flood fill |
 | `lib/editor/render.ts` | Canvas scaling and thumbnail rendering |
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | PNG/sprite-sheet export, project save/parse |
