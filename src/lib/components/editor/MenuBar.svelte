@@ -89,7 +89,7 @@
 			<DropdownMenu.Content class="w-56">
 				<DropdownMenu.Item onSelect={onNew}>
 					<FilePlus2 class="size-4" />
-					New sprite…
+					New project…
 					<DropdownMenu.Shortcut>Ctrl N</DropdownMenu.Shortcut>
 				</DropdownMenu.Item>
 				<DropdownMenu.Item onSelect={openProject}>

@@ -490,7 +490,7 @@
 						id="export-image-name"
 						bind:value={imageFileName}
 						maxlength={120}
-						placeholder="sprite-frame-1.png"
+						placeholder="project-frame-1.png"
 						autocomplete="off"
 					/>
 				</div>
@@ -573,7 +573,7 @@
 						id="export-sheet-name"
 						bind:value={sheetFileName}
 						maxlength={120}
-						placeholder="sprite-spritesheet.png"
+						placeholder="project-spritesheet.png"
 						autocomplete="off"
 					/>
 				</div>
@@ -686,7 +686,7 @@
 						id="export-gif-name"
 						bind:value={gifFileName}
 						maxlength={120}
-						placeholder="sprite.gif"
+						placeholder="project.gif"
 						autocomplete="off"
 					/>
 				</div>

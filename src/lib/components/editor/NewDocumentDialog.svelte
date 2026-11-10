@@ -38,7 +38,7 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>New sprite</Dialog.Title>
+			<Dialog.Title>New project</Dialog.Title>
 			<Dialog.Description>
 				Name your project, pick a canvas size, and choose how the canvas starts. Small sizes
 				are your friend.
@@ -130,7 +130,7 @@
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
-			<Button onclick={create}>Create sprite</Button>
+			<Button onclick={create}>Create project</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

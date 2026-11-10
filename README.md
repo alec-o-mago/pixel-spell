@@ -73,7 +73,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Blur                | `K`                      |
 | Jumble              | `J`                      |
 | Undo / redo         | `Ctrl+Z` / `Ctrl+Shift+Z` |
-| New sprite          | `Ctrl+N`                 |
+| New project         | `Ctrl+N`                 |
 | Save project        | `Ctrl+S`                 |
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
@@ -131,7 +131,7 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 
 - Open project tabs are kept in memory; reloading the page starts with a single new `Untitled` project.
 - Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
-- **File → New sprite** and **File → Open project** create new tabs; **File → Save project** saves the active project.
+- **File → New project** and **File → Open project** create new tabs; **File → Save project** saves the active project.
 - **File → Import…** opens a file picker, and dropping a file anywhere in the app opens the same import dialog. Images become unsaved project tabs; palettes are added to the workspace palette collection.
 - **File → Export…** opens the export dialog for images, sprite sheets, and animated GIFs. Outputs are generated locally and downloaded by the browser.
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
@@ -139,4 +139,4 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no selection or move tool yet.
 - The editor does not auto-save. Use **File → Save project** to keep your work.
-- The default canvas is 32 × 32; new sprites can be 1–1024 px in each dimension.
+- The default canvas is 32 × 32; new projects can be 1–1024 px in each dimension.

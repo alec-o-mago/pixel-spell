@@ -31,7 +31,7 @@
 			items: [
 				{ label: "Undo", keys: "Ctrl Z" },
 				{ label: "Redo", keys: "Ctrl ⇧ Z" },
-				{ label: "New sprite", keys: "Ctrl N" },
+				{ label: "New project", keys: "Ctrl N" },
 				{ label: "Save project", keys: "Ctrl S" },
 				{ label: "Play / pause", keys: "Space" },
 				{ label: "Previous frame", keys: "[" },
