@@ -19,6 +19,9 @@ export type ToolId =
 /** Raster shapes available to the shape and shape-selection tools. */
 export type ShapeKind = "rectangle" | "ellipse" | "star" | "heart";
 
+/** Initial canvas fill chosen when a project is created. */
+export type BackgroundKind = "transparent" | "white" | "black";
+
 /** Which mouse button a color is assigned to. */
 export type ColorSlot = "primary" | "secondary";
 

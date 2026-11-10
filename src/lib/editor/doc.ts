@@ -1,4 +1,5 @@
-import type { Layer, PixelDoc } from "./types.js";
+import { packColor } from "./color.js";
+import type { BackgroundKind, Layer, PixelDoc } from "./types.js";
 
 let idCounter = 0;
 
@@ -23,13 +24,30 @@ export function createLayer(
 	};
 }
 
-export function createDoc(width = 32, height = 32): PixelDoc {
+export function createDoc(
+	width = 32,
+	height = 32,
+	background: BackgroundKind = "transparent",
+): PixelDoc {
+	const layer = createLayer(
+		background === "transparent" ? "Layer 1" : "Background",
+		width,
+		height,
+		1,
+	);
+
+	if (background !== "transparent") {
+		layer.cels[0]!.fill(
+			packColor(background === "white" ? "#ffffff" : "#000000"),
+		);
+	}
+
 	return {
 		width,
 		height,
 		fps: 12,
 		frames: [{ id: uid("frame") }],
-		layers: [createLayer("Layer 1", width, height, 1)],
+		layers: [layer],
 	};
 }
 

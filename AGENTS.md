@@ -71,7 +71,7 @@ Key files:
 - Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame, zoom, pan, undo/redo).
 - Before switching, creating, opening, or saving, `#syncActiveProject()` copies live state into the active tab/snapshot. `#activateProject(id)` loads a target snapshot and tab metadata into the live fields.
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
-- `newProject(width, height)` and `openProject(loaded)` add a tab and activate it. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
+- `newProject(width, height, { name, background })` and `openProject(loaded)` add a tab and activate it. `background` is `transparent`, `white`, or `black`; opaque backgrounds fill the initial layer and name it `Background`. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
 - Undo/redo, zoom, pan, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
 - `ProjectTabs.svelte` owns the tab strip and the unsaved-close `Dialog`. The close button is disabled when `projects.length === 1 && !isProjectModified(id)`.

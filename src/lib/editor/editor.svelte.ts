@@ -11,6 +11,7 @@ import {
 	type Palette,
 } from "./palette.js";
 import type {
+	BackgroundKind,
 	ColorSlot,
 	Layer,
 	MirrorAxis,
@@ -705,6 +706,13 @@ export class EditorState {
 		this.#persistPalettes();
 	}
 
+	removeLastPaletteColor(): void {
+		const palette = this.activePalette;
+		if (palette.builtin || palette.colors.length === 0) return;
+		palette.colors.pop();
+		this.#persistPalettes();
+	}
+
 	toggleTheme(): void {
 		this.theme = this.theme === "dark" ? "light" : "dark";
 	}
@@ -883,11 +891,16 @@ export class EditorState {
 		}
 	}
 
-	newProject(width: number, height: number): void {
+	newProject(
+		width: number,
+		height: number,
+		options: { name?: string; background?: BackgroundKind } = {},
+	): void {
 		const w = clamp(Math.round(width) || 32, MIN_SIZE, MAX_SIZE);
 		const h = clamp(Math.round(height) || 32, MIN_SIZE, MAX_SIZE);
-		const doc = createDoc(w, h);
-		const name = this.#nextUntitledName();
+		const doc = createDoc(w, h, options.background ?? "transparent");
+		const requestedName = options.name?.trim().slice(0, 60);
+		const name = requestedName || this.#nextUntitledName();
 
 		this.#syncActiveProject();
 		const id = uid("project");
