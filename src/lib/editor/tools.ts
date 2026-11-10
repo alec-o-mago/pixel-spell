@@ -87,6 +87,12 @@ export const TOOLS: ToolDef[] = [
 		shortcut: "G",
 	},
 	{
+		id: "gradient",
+		label: "Gradient",
+		description: "Fill an area with a linear or radial gradient",
+		shortcut: "D",
+	},
+	{
 		id: "eyedropper",
 		label: "Eyedropper",
 		description: "Pick a color from the canvas",

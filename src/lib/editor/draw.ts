@@ -1,4 +1,9 @@
-import type { MirrorAxis, ShapeKind } from "./types.js";
+import type {
+	GradientDither,
+	GradientShape,
+	MirrorAxis,
+	ShapeKind,
+} from "./types.js";
 
 export type PixelWriter = (x: number, y: number) => void;
 
@@ -464,6 +469,117 @@ function colorMatches(a: number, b: number, tolerance: number): boolean {
 	);
 }
 
+interface BayerPattern {
+	size: number;
+	mask: number;
+	shift: number;
+	thresholds: Float32Array;
+}
+
+function bayerThresholds(values: number[], size: number): Float32Array {
+	const total = size * size;
+	return new Float32Array(values.map((value) => (value + 0.5) / total));
+}
+
+const BAYER_PATTERNS: Record<Exclude<GradientDither, "none">, BayerPattern> = {
+	bayer2: {
+		size: 2,
+		mask: 1,
+		shift: 1,
+		thresholds: bayerThresholds([0, 2, 3, 1], 2),
+	},
+	bayer4: {
+		size: 4,
+		mask: 3,
+		shift: 2,
+		thresholds: bayerThresholds(
+			[
+				0, 8, 2, 10,
+				12, 4, 14, 6,
+				3, 11, 1, 9,
+				15, 7, 13, 5,
+			],
+			4,
+		),
+	},
+	bayer8: {
+		size: 8,
+		mask: 7,
+		shift: 3,
+		thresholds: bayerThresholds(
+			[
+				0, 32, 8, 40, 2, 34, 10, 42,
+				48, 16, 56, 24, 50, 18, 58, 26,
+				12, 44, 4, 36, 14, 46, 6, 38,
+				60, 28, 52, 20, 62, 30, 54, 22,
+				3, 35, 11, 43, 1, 33, 9, 41,
+				51, 19, 59, 27, 49, 17, 57, 25,
+				15, 47, 7, 39, 13, 45, 5, 37,
+				63, 31, 55, 23, 61, 29, 53, 21,
+			],
+			8,
+		),
+	},
+};
+
+/**
+ * Builds the same region a fill would affect: a matching connected area, or
+ * every matching pixel when `contiguous` is false.
+ */
+function matchingRegionMask(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+	tolerance: number,
+	contiguous: boolean,
+	clip: Uint8Array | null,
+	lockAlpha: boolean,
+): Uint8Array | null {
+	if (x < 0 || x >= width || y < 0 || y >= height) return null;
+
+	const startIndex = y * width + x;
+	if (clip && !clip[startIndex]) return null;
+	if (lockAlpha && (cel[startIndex]! >>> 24) === 0) return null;
+
+	const target = cel[startIndex]!;
+	const mask = new Uint8Array(width * height);
+
+	if (!contiguous) {
+		for (let index = 0; index < cel.length; index++) {
+			if (clip && !clip[index]) continue;
+			if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
+			if (colorMatches(cel[index]!, target, tolerance)) mask[index] = 1;
+		}
+		return mask;
+	}
+
+	const visited = new Uint8Array(width * height);
+	const stack: number[] = [startIndex];
+
+	while (stack.length > 0) {
+		const index = stack.pop()!;
+		if (visited[index]) continue;
+		visited[index] = 1;
+		if (clip && !clip[index]) continue;
+		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
+		if (!colorMatches(cel[index]!, target, tolerance)) continue;
+
+		mask[index] = 1;
+
+		const px = index % width;
+		const py = (index - px) / width;
+
+		if (px > 0) stack.push(index - 1);
+		if (px < width - 1) stack.push(index + 1);
+		if (py > 0) stack.push(index - width);
+		if (py < height - 1) stack.push(index + width);
+	}
+
+	return mask;
+}
+
 /** Flood fill (contiguous) or global replace (non-contiguous). */
 export function fillPixels(
 	cel: Uint32Array,
@@ -486,42 +602,125 @@ export function fillPixels(
 	const target = cel[startIndex];
 	if (target === color) return false;
 
+	const mask = matchingRegionMask(
+		cel,
+		width,
+		height,
+		x,
+		y,
+		tolerance,
+		contiguous,
+		clip,
+		lockAlpha,
+	);
+	if (!mask) return false;
+
 	let changed = false;
-
-	if (!contiguous) {
-		for (let i = 0; i < cel.length; i++) {
-			if (clip && !clip[i]) continue;
-			if (lockAlpha && (cel[i]! >>> 24) === 0) continue;
-			if (colorMatches(cel[i]!, target!, tolerance)) {
-				cel[i] = color;
-				changed = true;
-			}
-		}
-		return changed;
-	}
-
-	const visited = new Uint8Array(width * height);
-	const stack: number[] = [startIndex];
-
-	while (stack.length > 0) {
-		const index = stack.pop()!;
-		if (visited[index]) continue;
-		visited[index] = 1;
-		if (clip && !clip[index]) continue;
-		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
-
-		if (!colorMatches(cel[index], target, tolerance)) continue;
-
+	for (let index = 0; index < mask.length; index++) {
+		if (!mask[index] || cel[index] === color) continue;
 		cel[index] = color;
 		changed = true;
+	}
+	return changed;
+}
 
-		const px = index % width;
-		const py = (index - px) / width;
+function lerpPackedColor(from: number, to: number, amount: number): number {
+	const fromRed = from & 0xff;
+	const fromGreen = (from >>> 8) & 0xff;
+	const fromBlue = (from >>> 16) & 0xff;
+	const fromAlpha = from >>> 24;
+	const toRed = to & 0xff;
+	const toGreen = (to >>> 8) & 0xff;
+	const toBlue = (to >>> 16) & 0xff;
+	const toAlpha = to >>> 24;
 
-		if (px > 0) stack.push(index - 1);
-		if (px < width - 1) stack.push(index + 1);
-		if (py > 0) stack.push(index - width);
-		if (py < height - 1) stack.push(index + width);
+	const red = Math.round(fromRed + (toRed - fromRed) * amount);
+	const green = Math.round(fromGreen + (toGreen - fromGreen) * amount);
+	const blue = Math.round(fromBlue + (toBlue - fromBlue) * amount);
+	const alpha = Math.round(fromAlpha + (toAlpha - fromAlpha) * amount);
+
+	return (
+		(((alpha & 0xff) << 24) |
+			((blue & 0xff) << 16) |
+			((green & 0xff) << 8) |
+			(red & 0xff)) >>>
+		0
+	);
+}
+
+/**
+ * Applies a linear or radial gradient between two colors inside the region a
+ * fill would affect at the start point. Bayer dithering picks one endpoint per
+ * pixel, while `none` blends the endpoints continuously.
+ */
+export function gradientPixels(
+	cel: Uint32Array,
+	width: number,
+	height: number,
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+	startColor: number,
+	endColor: number,
+	tolerance: number,
+	contiguous: boolean,
+	shape: GradientShape,
+	dither: GradientDither,
+	clip: Uint8Array | null = null,
+	lockAlpha = false,
+): boolean {
+	const deltaX = endX - startX;
+	const deltaY = endY - startY;
+	const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+	if (lengthSquared === 0) return false;
+
+	const mask = matchingRegionMask(
+		cel,
+		width,
+		height,
+		startX,
+		startY,
+		tolerance,
+		contiguous,
+		clip,
+		lockAlpha,
+	);
+	if (!mask) return false;
+
+	const radius = Math.sqrt(lengthSquared);
+	const pattern = dither === "none" ? null : BAYER_PATTERNS[dither];
+	let changed = false;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const index = y * width + x;
+			if (!mask[index]) continue;
+
+			let amount: number;
+			if (shape === "linear") {
+				amount =
+					((x - startX) * deltaX + (y - startY) * deltaY) / lengthSquared;
+			} else {
+				amount = Math.hypot(x - startX, y - startY) / radius;
+			}
+			amount = Math.max(0, Math.min(1, amount));
+
+			let next: number;
+			if (pattern) {
+				const threshold =
+					pattern.thresholds[
+						((y & pattern.mask) << pattern.shift) + (x & pattern.mask)
+					]!;
+				next = amount > threshold ? endColor : startColor;
+			} else {
+				next = lerpPackedColor(startColor, endColor, amount);
+			}
+
+			if (cel[index] === next) continue;
+			cel[index] = next;
+			changed = true;
+		}
 	}
 
 	return changed;

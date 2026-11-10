@@ -9,6 +9,7 @@
 	import {
 		blurPixels,
 		fillPixels,
+		gradientPixels,
 		jumblePixels,
 		paintBrush,
 		paintPixel,
@@ -43,6 +44,9 @@
 	let backup: Uint32Array | null = null;
 	/** Packed color captured on pointer down, so the whole stroke stays consistent. */
 	let strokeColor = 0;
+	let gradientStartColor = 0;
+	let gradientEndColor = 0;
+	let gradientHistoryPushed = false;
 	let strokePath: Point[] = [];
 	let strokePixelPerfect = false;
 
@@ -521,6 +525,30 @@
 				editor.shapeFilled ? dot : stroke,
 			);
 		}
+	}
+
+	function drawGradient(cel: Uint32Array, end: Point): boolean {
+		if (!backup || !start) return false;
+		cel.set(backup);
+
+		const tolerance = Math.round((editor.gradientTolerance / 100) * 255);
+		return gradientPixels(
+			cel,
+			editor.doc.width,
+			editor.doc.height,
+			start.x,
+			start.y,
+			end.x,
+			end.y,
+			gradientStartColor,
+			gradientEndColor,
+			tolerance,
+			editor.gradientContiguous,
+			editor.gradientShape,
+			editor.gradientDither,
+			editor.selection,
+			editor.lockAlpha,
+		);
 	}
 
 	function drawCurvePreview(cel: Uint32Array): void {
@@ -1273,6 +1301,8 @@
 
 		if (editor.selection && !isPointSelected(point)) return;
 		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
+		gradientStartColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
+		gradientEndColor = secondary ? editor.currentColor : editor.secondaryCurrentColor;
 
 		if (tool === "fill") {
 			editor.pushHistory();
@@ -1290,6 +1320,19 @@
 				editor.lockAlpha,
 			);
 			if (changed) editor.touch();
+			return;
+		}
+
+		if (tool === "gradient") {
+			// The gradient is only committed after the pointer moves, so a
+			// click does not create an empty history entry.
+			backup = new Uint32Array(cel);
+			drawing = true;
+			start = point;
+			last = point;
+			gradientHistoryPushed = false;
+			strokePath = [];
+			strokePixelPerfect = false;
 			return;
 		}
 
@@ -1418,6 +1461,15 @@
 				last = point;
 				applyAreaTool(cel, point);
 			}
+		} else if (editor.tool === "gradient") {
+			if (!last || last.x !== point.x || last.y !== point.y) {
+				if (!gradientHistoryPushed) {
+					editor.pushHistory();
+					gradientHistoryPushed = true;
+				}
+				last = point;
+				drawGradient(cel, point);
+			}
 		} else {
 			drawShape(cel, point);
 		}
@@ -1484,13 +1536,15 @@
 
 		if (drawing) {
 			stopSpray();
+			const commit = editor.tool !== "gradient" || gradientHistoryPushed;
 			drawing = false;
 			backup = null;
 			start = null;
 			last = null;
 			strokePath = [];
 			strokePixelPerfect = false;
-			editor.touch();
+			gradientHistoryPushed = false;
+			if (commit) editor.touch();
 		}
 		releasePointer(event);
 		setCursor(pixelFromEvent(event));

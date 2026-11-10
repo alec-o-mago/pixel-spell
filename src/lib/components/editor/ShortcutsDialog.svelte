@@ -18,6 +18,7 @@
 				{ label: "Spray", keys: "S" },
 				{ label: "Eraser", keys: "E" },
 				{ label: "Fill", keys: "G" },
+				{ label: "Gradient", keys: "D" },
 				{ label: "Eyedropper", keys: "I" },
 				{ label: "Line", keys: "L" },
 				{ label: "Curve", keys: "U" },

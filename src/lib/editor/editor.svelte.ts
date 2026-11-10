@@ -13,6 +13,8 @@ import {
 import type {
 	BackgroundKind,
 	ColorSlot,
+	GradientDither,
+	GradientShape,
 	Layer,
 	MirrorAxis,
 	MirrorKind,
@@ -119,6 +121,10 @@ export class EditorState {
 	selectionShape = $state<ShapeKind>("rectangle");
 	fillTolerance = $state(0);
 	fillContiguous = $state(true);
+	gradientTolerance = $state(0);
+	gradientContiguous = $state(true);
+	gradientShape = $state<GradientShape>("linear");
+	gradientDither = $state<GradientDither>("bayer2");
 	sampleAllLayers = $state(true);
 	magicWandDiagonal = $state(false);
 

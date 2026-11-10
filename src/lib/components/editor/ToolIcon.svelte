@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Blend from "@lucide/svelte/icons/blend";
 	import Dices from "@lucide/svelte/icons/dices";
 	import Droplets from "@lucide/svelte/icons/droplets";
 	import Eraser from "@lucide/svelte/icons/eraser";
@@ -46,6 +47,8 @@
 	<Square class={className} />
 {:else if tool === "fill"}
 	<PaintBucket class={className} />
+{:else if tool === "gradient"}
+	<Blend class={className} />
 {:else if tool === "blur"}
 	<Droplets class={className} />
 {:else if tool === "jumble"}

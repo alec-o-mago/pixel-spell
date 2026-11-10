@@ -6,7 +6,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 ## Features
 
-- **Drawing tools** — pencil, spray, eraser, line, curve, shape, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. The shape tool draws rectangles, ellipses, stars, or hearts, either as an outline or filled. Zooming with the tool or the scroll wheel moves the view halfway from the current center toward the pointer. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
+- **Drawing tools** — pencil, spray, eraser, line, curve, shape, paint bucket, gradient, and eyedropper, plus pan and pointer-focused zoom tools. The shape tool draws rectangles, ellipses, stars, or hearts, either as an outline or filled. The gradient tool fills a matching area with a linear or radial primary-to-secondary gradient, using optional Bayer 2×2, 4×4, or 8×8 dithering, fill tolerance, and contiguous-region matching. Zooming with the tool or the scroll wheel moves the view halfway from the current center toward the pointer. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
 - **Area effects** — the blur and jumble tools soften or scramble pixels inside a round area as you pass over them, with adjustable radius and power.
 - **Selections** — magic wand (with optional diagonal connections), a shape marquee tool for rectangles, ellipses, stars, and hearts, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; hold `Shift` while making another selection to add it to the current one. Copy and paste selected pixels with `Ctrl+C` and `Ctrl+V` using an in-app clipboard. Pasted pixels stay floating so they can be dragged before being applied on deselect; moving or floating selections are previewed at 50% opacity. Transparent pixels are skipped so they never erase the destination. Edits are clipped to the selected area, and `Delete` clears the selected pixels. Deselect with the panel button, `Esc`, or by clicking the empty canvas stage with a selection tool.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, layer-aware color sampling, and selection options. The top bar's alpha-lock toggle prevents painting over fully transparent pixels.
@@ -69,6 +69,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Curve               | `U`                      |
 | Shape               | `R`                      |
 | Fill                | `G`                      |
+| Gradient            | `D`                      |
 | Eyedropper          | `I`                      |
 | Blur                | `K`                      |
 | Jumble              | `J`                      |

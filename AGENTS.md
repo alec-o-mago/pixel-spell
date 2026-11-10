@@ -40,7 +40,7 @@ Key files:
 | `lib/editor/editor.svelte.ts` | Singleton `editor` state, history, layer/frame operations, zoom/theme |
 | `lib/editor/types.ts` | `PixelDoc`, `Layer`, `Frame`, `ToolId`, `Point` |
 | `lib/editor/doc.ts` | Document creation/cloning, layer compositing |
-| `lib/editor/draw.ts` | Brush, line, shapes (rectangle, ellipse, star, heart), flood fill |
+| `lib/editor/draw.ts` | Brush, line, shapes (rectangle, ellipse, star, heart), flood fill, gradients |
 | `lib/editor/render.ts` | Canvas scaling and thumbnail rendering |
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | Project serialization, save helpers |
@@ -100,7 +100,7 @@ Pixels are packed little-endian RGBA:
 2. On pointer down: guard against hidden/locked layers, push history, snapshot the active cel for shape preview.
 3. Freehand tools paint through `paintBrush` (applies size and X/Y symmetry).
 4. Shape tools restore the backup cel on each move and redraw from the start point, so the preview is non-destructive until pointer up.
-5. Fill and eyedropper are single-click operations.
+5. Fill and eyedropper are single-click operations; the gradient tool previews from a backup cel while dragging.
 6. Every pixel change calls `editor.touch()`.
 
 When adding a tool:
@@ -186,7 +186,7 @@ Preserve these regions and their relative placement when making changes.
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
-- Drawing, erasing, fill, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
+- Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Project tabs switch correctly with independent documents, undo history, zoom, and dirty state; closing a dirty project confirms first.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.
