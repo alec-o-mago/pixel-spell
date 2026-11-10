@@ -25,11 +25,10 @@
 		lassoSelectionMask,
 		magicWandMask,
 		rectSelectionMask,
-		translateSelectionMask,
 		unionSelectionMasks,
 	} from "$lib/editor/selection.js";
-	import { drawScaled } from "$lib/editor/render.js";
-	import { editor } from "$lib/editor/editor.svelte.js";
+	import { drawScaled, pixelsToImageData } from "$lib/editor/render.js";
+	import { editor, type FloatingSelection } from "$lib/editor/editor.svelte.js";
 	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
 	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
@@ -81,10 +80,12 @@
 
 	let movingSelection = false;
 	let moveStart: Point | null = null;
-	let moveCel: Uint32Array | null = null;
-	let moveBackup: Uint32Array | null = null;
-	let moveMask: Uint8Array | null = null;
+	let moveContent: FloatingSelection | null = null;
+	let moveOriginX = 0;
+	let moveOriginY = 0;
 	let moveApplied = false;
+	/** True when the drag started on content that was already floating. */
+	let moveExistingFloating = false;
 
 	let hoveringSelection = $state(false);
 	let hoveringMirror = $state<MirrorKind | null>(null);
@@ -196,6 +197,7 @@
 		const doc = editor.doc;
 		const currentZoom = editor.effectiveZoom;
 		const selection = editor.selection;
+		const floating = editor.floating;
 		editor.selectionRevision;
 		const lasso = lassoPoints;
 		const hover = lassoHover;
@@ -209,7 +211,7 @@
 
 		const context = overlayCanvas.getContext("2d");
 		if (!context) return;
-		drawOverlay(context, selection, lasso, hover, doc.width, doc.height);
+		drawOverlay(context, selection, floating, lasso, hover, doc.width, doc.height);
 	});
 
 	$effect(() => {
@@ -867,60 +869,68 @@
 	}
 
 	function beginSelectionMove(point: Point): void {
-		const layer = editor.activeLayer;
-		const cel = layer.cels[editor.activeFrame];
-		if (!cel || !editor.selection) return;
+		if (!editor.selection) return;
+
+		const existing = editor.floating;
+		if (existing) {
+			movingSelection = true;
+			moveStart = point;
+			moveContent = existing;
+			moveOriginX = existing.originX;
+			moveOriginY = existing.originY;
+			moveApplied = false;
+			moveExistingFloating = true;
+			return;
+		}
+
+		const cel = editor.activeLayer.cels[editor.activeFrame];
+		if (!cel) return;
+
+		const content = editor.createFloatingSelection();
+		if (!content) return;
 
 		movingSelection = true;
 		moveStart = point;
-		moveCel = cel;
-		moveBackup = new Uint32Array(cel);
-		moveMask = new Uint8Array(editor.selection);
+		moveContent = content;
+		moveOriginX = content.originX;
+		moveOriginY = content.originY;
 		moveApplied = false;
+		moveExistingFloating = false;
 	}
 
 	function updateSelectionMove(point: Point): void {
-		if (!moveStart || !moveCel || !moveBackup || !moveMask) return;
+		if (!moveStart || !moveContent) return;
 		const dx = point.x - moveStart.x;
 		const dy = point.y - moveStart.y;
 		if (dx === 0 && dy === 0 && !moveApplied) return;
 
+		const targetX = moveOriginX + dx;
+		const targetY = moveOriginY + dy;
+
 		if (!moveApplied) {
-			editor.pushHistory();
-			moveApplied = true;
-		}
-
-		const width = editor.doc.width;
-		const height = editor.doc.height;
-		moveCel.set(moveBackup);
-
-		for (let i = 0; i < moveMask.length; i++) {
-			if (moveMask[i]) moveCel[i] = 0;
-		}
-
-		for (let y = 0; y < height; y++) {
-			for (let x = 0; x < width; x++) {
-				const index = y * width + x;
-				if (!moveMask[index]) continue;
-				const nx = x + dx;
-				const ny = y + dy;
-				if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-				moveCel[ny * width + nx] = moveBackup[index]!;
+			if (moveExistingFloating) {
+				editor.moveFloatingSelection(targetX, targetY);
+			} else {
+				editor.beginFloatingMove(moveContent, targetX, targetY);
 			}
+			moveApplied = true;
+			return;
 		}
 
-		editor.setSelection(translateSelectionMask(moveMask, width, height, dx, dy));
-		editor.touch();
+		editor.moveFloatingSelection(targetX, targetY);
 	}
 
 	function finishSelectionMove(): void {
-		if (moveApplied) editor.touch();
+		// A lifted selection is applied when the drag ends. An existing floating
+		// paste stays floating until the user deselects it.
+		if (moveApplied && !moveExistingFloating) {
+			editor.commitFloatingSelection();
+		}
 		movingSelection = false;
 		moveStart = null;
-		moveCel = null;
-		moveBackup = null;
-		moveMask = null;
+		moveContent = null;
 		moveApplied = false;
+		moveExistingFloating = false;
 	}
 
 	function capturePointer(
@@ -943,9 +953,40 @@
 		}
 	}
 
+	function drawFloatingPixels(
+		context: CanvasRenderingContext2D,
+		floating: FloatingSelection,
+		scaleX: number,
+		scaleY: number,
+	): void {
+		const source = document.createElement("canvas");
+		source.width = Math.max(1, floating.width);
+		source.height = Math.max(1, floating.height);
+		const sourceContext = source.getContext("2d");
+		if (!sourceContext) return;
+		sourceContext.putImageData(
+			pixelsToImageData(floating.pixels, floating.width, floating.height),
+			0,
+			0,
+		);
+
+		context.save();
+		context.globalAlpha = 0.5;
+		context.imageSmoothingEnabled = false;
+		context.drawImage(
+			source,
+			floating.originX * scaleX,
+			floating.originY * scaleY,
+			floating.width * scaleX,
+			floating.height * scaleY,
+		);
+		context.restore();
+	}
+
 	function drawOverlay(
 		context: CanvasRenderingContext2D,
 		selection: Uint8Array | null,
+		floating: FloatingSelection | null,
 		lasso: Point[],
 		hover: Point | null,
 		docWidth: number,
@@ -961,6 +1002,8 @@
 		context.clearRect(0, 0, context.canvas.width, context.canvas.height);
 		context.lineJoin = "round";
 		context.lineCap = "butt";
+
+		if (floating) drawFloatingPixels(context, floating, scaleX, scaleY);
 
 		if (selection) {
 			context.beginPath();

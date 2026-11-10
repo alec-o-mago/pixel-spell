@@ -82,6 +82,16 @@
 				editor.selectAll();
 				return;
 			}
+			if (key === "c") {
+				event.preventDefault();
+				editor.copySelection();
+				return;
+			}
+			if (key === "v") {
+				event.preventDefault();
+				editor.pasteSelection();
+				return;
+			}
 			return;
 		}
 

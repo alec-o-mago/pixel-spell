@@ -40,6 +40,8 @@
 				{ label: "Next frame", keys: "]" },
 				{ label: "Toggle grid", keys: "⇧ G" },
 				{ label: "Select all", keys: "Ctrl A" },
+				{ label: "Copy selection", keys: "Ctrl C" },
+				{ label: "Paste selection", keys: "Ctrl V" },
 				{ label: "Delete selection", keys: "Delete" },
 			],
 		},

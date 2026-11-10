@@ -12,12 +12,46 @@ function hasAny(mask: Uint8Array): boolean {
 	return false;
 }
 
+export interface SelectionBounds {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
 export function isSelectionPoint(
 	mask: Uint8Array | null,
 	width: number,
 	point: Point,
 ): boolean {
 	return !!mask && mask[point.y * width + point.x] === 1;
+}
+
+/** Tight bounding box around the selected pixels, or null for an empty mask. */
+export function selectionBounds(
+	mask: Uint8Array | null,
+	width: number,
+	height: number,
+): SelectionBounds | null {
+	if (!mask) return null;
+
+	let minX = width;
+	let minY = height;
+	let maxX = -1;
+	let maxY = -1;
+
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			if (!mask[y * width + x]) continue;
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+		}
+	}
+
+	if (maxX < minX || maxY < minY) return null;
+	return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
 }
 
 export function rectSelectionMask(

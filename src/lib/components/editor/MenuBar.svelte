@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
+	import Copy from "@lucide/svelte/icons/copy";
 	import Eraser from "@lucide/svelte/icons/eraser";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
 	import FlipHorizontal2 from "@lucide/svelte/icons/flip-horizontal-2";
@@ -135,6 +137,23 @@
 					<Redo2 class="size-4" />
 					Redo
 					<DropdownMenu.Shortcut>Ctrl ⇧ Z</DropdownMenu.Shortcut>
+				</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item
+					onSelect={() => editor.copySelection()}
+					disabled={!editor.hasSelection}
+				>
+					<Copy class="size-4" />
+					Copy selection
+					<DropdownMenu.Shortcut>Ctrl C</DropdownMenu.Shortcut>
+				</DropdownMenu.Item>
+				<DropdownMenu.Item
+					onSelect={() => editor.pasteSelection()}
+					disabled={!editor.hasClipboard}
+				>
+					<ClipboardPaste class="size-4" />
+					Paste selection
+					<DropdownMenu.Shortcut>Ctrl V</DropdownMenu.Shortcut>
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item onSelect={() => editor.clearLayer()}>

@@ -8,7 +8,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 
 - **Drawing tools** — pencil, spray, eraser, line, curve, rectangle, ellipse, paint bucket, and eyedropper, plus pan and pointer-focused zoom tools. Zooming with the tool or the scroll wheel moves the view halfway from the current center toward the pointer. The curve tool starts with a dragged base line, then two clicks place its control points. The spray tool scatters random pixels inside a round area at an adjustable pixel rate.
 - **Area effects** — the blur and jumble tools soften or scramble pixels inside a round area as you pass over them, with adjustable radius and power.
-- **Selections** — magic wand (with optional diagonal connections), separate rectangle and ellipse marquee tools, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; hold `Shift` while making another selection to add it to the current one. Edits are clipped to the selected area, and `Delete` clears the selected pixels. Deselect with the panel button, `Esc`, or by clicking the empty canvas stage with a selection tool.
+- **Selections** — magic wand (with optional diagonal connections), separate rectangle and ellipse marquee tools, freehand or polygonal lasso, and select-by-color. Drag inside a selection to move its pixels; hold `Shift` while making another selection to add it to the current one. Copy and paste selected pixels with `Ctrl+C` and `Ctrl+V` using an in-app clipboard. Pasted pixels stay floating so they can be dragged before being applied on deselect; moving or floating selections are previewed at 50% opacity. Transparent pixels are skipped so they never erase the destination. Edits are clipped to the selected area, and `Delete` clears the selected pixels. Deselect with the panel button, `Esc`, or by clicking the empty canvas stage with a selection tool.
 - **Tool options** — brush sizes from 1–8 px, filled shapes, fill tolerance and contiguous fill, layer-aware color sampling, and selection options. The top bar's alpha-lock toggle prevents painting over fully transparent pixels.
 - **Pixel perfect** — optional corner-pixel removal for smoother pencil, eraser, and curve strokes.
 - **Mirroring** — X, Y, and two diagonal axis mirrors. X mirrors across the horizontal axis and Y across the vertical axis. Active axes are drawn as dashed blue lines across the whole canvas stage and can be dragged from anywhere on the stage; drag a line in half-pixel steps to move its mirror axis. Turning a mirror off resets its guide to the center. The toggles live in the top bar next to the theme switch.
@@ -80,6 +80,8 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Previous / next frame | `[` / `]` or `,` / `.`  |
 | Toggle pixel grid   | `Shift+G`                |
 | Select all          | `Ctrl+A`                 |
+| Copy selection      | `Ctrl+C`                 |
+| Paste selection     | `Ctrl+V`                 |
 | Delete selection    | `Delete`                 |
 | Deselect            | `Esc`                    |
 | Resize timeline     | Drag divider, or `↑` / `↓` |
