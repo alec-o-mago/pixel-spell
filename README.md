@@ -127,7 +127,7 @@ A document is a `PixelDoc`:
 
 Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written directly into `ImageData` for rendering and PNG export. Transparent pixels are `0`.
 
-Project files use a compact binary container (`PXSP` version 2). Layer metadata is stored as UTF-8 JSON and each cel is stored as raw little-endian RGBA or run-length encoded data, whichever is smaller. Pixel art is usually dominated by flat color and transparency runs, so RLE keeps files small. Legacy version 1 JSON projects still open; saving upgrades them to the binary format.
+Project files use a compact binary container (`PXSP`). Layer metadata is stored in a UTF-8 metadata block and each cel is stored as raw little-endian RGBA or run-length encoded data, whichever is smaller. Pixel art is usually dominated by flat color and transparency runs, so RLE keeps files small.
 
 Undo history stores one previous cel buffer for pixel edits and a full document snapshot only for structural edits (adding, deleting, or reordering layers and frames). The stack is capped at 80 entries and about 128 MB per project.
 

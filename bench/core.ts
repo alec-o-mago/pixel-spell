@@ -279,39 +279,6 @@ const opaqueDoc = makeDoc(64, 64, 1, 1, 42);
 for (const cel of opaqueDoc.layers[0]!.cels) cel.fill(0xff336699);
 assertProjectRoundtrip(opaqueDoc, "flat");
 
-// Legacy v1 JSON files must still load.
-const legacyCel = new Uint32Array([0xffff0000, 0, 0, 0xff00ff00]);
-let legacyBinary = "";
-for (const byte of new Uint8Array(legacyCel.buffer)) {
-	legacyBinary += String.fromCharCode(byte);
-}
-const legacy = JSON.stringify({
-	format: "pixel-spell",
-	version: 1,
-	name: "Legacy",
-	width: 2,
-	height: 2,
-	fps: 12,
-	frameCount: 1,
-	activeFrame: 0,
-	activeLayerId: "layer-0",
-	palette: ["#ff0000"],
-	layers: [
-		{
-			id: "layer-0",
-			name: "Layer",
-			visible: true,
-			locked: false,
-			opacity: 1,
-			cels: [btoa(legacyBinary)],
-		},
-	],
-});
-const legacyParsed = parseProject(legacy);
-if (!legacyParsed || legacyParsed.doc.layers[0]!.cels[0]![0] !== 0xffff0000) {
-	throw new Error("Legacy v1 project did not parse");
-}
-
 // --- GIF export -----------------------------------------------------------
 const gifDoc = makeDoc(128, 128, 3, 12, 31);
 measure("exportGif 128x128x12", 4, 1, () => {

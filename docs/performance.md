@@ -81,8 +81,7 @@ The important UI result is that a brush stamp used to redraw every thumbnail in 
 
 ### Project files
 
-- Replaced the pretty-printed base64 JSON project format with a binary `PXSP` v2 container: a compact header, a UTF-8 JSON metadata block, and per-cel raw RGBA or RLE (whichever is smaller).
-- Legacy v1 JSON files still load. Saving upgrades them.
+- Project files use a binary `PXSP` container: a compact header, a UTF-8 metadata block, and per-cel raw RGBA or RLE (whichever is smaller).
 - Parsing rejects oversized dimensions, layer/frame counts, total cel bytes, duplicate layer ids, and huge palettes before allocating memory.
 - The GIF exporter caches composited frames when the document is small enough, avoiding a second composite pass. `ByteWriter.writeBytes` uses a bulk `set`.
 
@@ -92,7 +91,7 @@ The important UI result is that a brush stamp used to redraw every thumbnail in 
 npm run bench
 ```
 
-The benchmark also asserts that v2 sparse and flat documents round-trip exactly and that a legacy v1 JSON project still parses.
+The benchmark also asserts that sparse and flat documents round-trip exactly.
 
 The UI numbers were collected with an in-app browser script. A compact version of the measurement:
 

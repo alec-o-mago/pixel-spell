@@ -4,7 +4,7 @@ Guidance for AI coding agents working on Pixel Spell.
 
 ## What this project is
 
-Pixel Spell is a client-only pixel art editor built with Svelte 5, Vite, TypeScript, Tailwind CSS 4, shadcn-svelte, bits-ui, and Lucide icons. It supports layered sprites, frame-by-frame animation, PNG export, and portable JSON projects.
+Pixel Spell is a client-only pixel art editor built with Svelte 5, Vite, TypeScript, Tailwind CSS 4, shadcn-svelte, bits-ui, and Lucide icons. It supports layered sprites, frame-by-frame animation, PNG export, and portable project files.
 
 There is no backend, database, or server-side rendering. Everything runs in the browser.
 
@@ -166,10 +166,10 @@ Preserve these regions and their relative placement when making changes.
 
 ## Persistence and files
 
-- Project files use the `.pixelspell` extension and a binary `PXSP` version 2 container. The header stores dimensions, fps, frame/layer counts, and a UTF-8 JSON metadata block (name, palette, active frame/layer, layer flags). Each cel is stored as raw little-endian RGBA or RLE, whichever is smaller.
-- `serializeProject` returns a `Uint8Array`; `parseProject` accepts a v2 `Uint8Array`/`ArrayBuffer` or a legacy v1 JSON string. `readProjectFile` reads `arrayBuffer()`. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
+- Project files use the `.pixelspell` extension and a binary `PXSP` container. The header stores dimensions, fps, frame/layer counts, and a UTF-8 metadata block (name, palette, active frame/layer, layer flags). Each cel is stored as raw little-endian RGBA or RLE, whichever is smaller.
+- `serializeProject` returns a `Uint8Array`; `parseProject` accepts a `Uint8Array`/`ArrayBuffer`. `readProjectFile` reads `arrayBuffer()`. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
 - Parsing enforces 1–1024 px per side, at most 1024 layers, at most 1000 frames, a 512 MB cel budget, and a 256-color palette. Duplicate layer ids are regenerated so lookups stay unambiguous. Saving throws if a project exceeds the layer/frame limits.
-- Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
+- Layer visibility, opacity, and lock state are serialized with each layer. Missing boolean fields default to visible and unlocked.
 - Opening a project file creates a new tab; saving applies to the active project only.
 - Image export uses `canvas.toBlob`; sprite sheets support horizontal, vertical, and grid layouts.
 - `editor.saveToFile()` triggers a browser download and clears the dirty flag.
@@ -197,7 +197,7 @@ Preserve these regions and their relative placement when making changes.
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
-- `npm run bench` completes without assertion failures (it also verifies v2/v1 project round-trips).
+- `npm run bench` completes without assertion failures (it also verifies project round-trips).
 - Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Project tabs switch correctly with independent documents, undo history, zoom, and dirty state; closing a dirty project confirms first.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.

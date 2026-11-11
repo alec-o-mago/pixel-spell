@@ -2,29 +2,6 @@ import { normalizeHex } from "./color.js";
 import { uid } from "./doc.js";
 import type { Layer, PixelDoc } from "./types.js";
 
-interface SerializedLayer {
-	id: string;
-	name: string;
-	visible: boolean;
-	locked: boolean;
-	opacity: number;
-	cels: string[];
-}
-
-interface SerializedProject {
-	format: "pixel-spell";
-	version: 1;
-	name: string;
-	width: number;
-	height: number;
-	fps: number;
-	frameCount: number;
-	activeFrame: number;
-	activeLayerId: string;
-	palette: string[];
-	layers: SerializedLayer[];
-}
-
 export interface LoadedProject {
 	doc: PixelDoc;
 	palette?: string[];
@@ -34,7 +11,7 @@ export interface LoadedProject {
 }
 
 const MAGIC = [0x50, 0x58, 0x53, 0x50]; // "PXSP"
-const FORMAT_VERSION = 2;
+const FORMAT_VERSION = 1;
 const METHOD_RAW = 0;
 const METHOD_RLE = 1;
 const HEADER_SIZE = 4 + 1 + 1 + 2 + 2 + 1 + 2 + 2 + 4;
@@ -61,28 +38,6 @@ interface ProjectMeta {
 
 const clamp = (value: number, min: number, max: number) =>
 	Math.max(min, Math.min(max, value));
-
-function encodePixels(pixels: Uint32Array): string {
-	const bytes = new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength);
-	let binary = "";
-	const chunkSize = 0x8000;
-	for (let index = 0; index < bytes.length; index += chunkSize) {
-		binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-	}
-	return btoa(binary);
-}
-
-function decodePixels(encoded: string, pixelCount: number): Uint32Array {
-	const binary = atob(encoded);
-	if (binary.length !== pixelCount * 4) {
-		throw new Error("Pixel data length mismatch");
-	}
-	const bytes = new Uint8Array(binary.length);
-	for (let index = 0; index < binary.length; index++) {
-		bytes[index] = binary.charCodeAt(index);
-	}
-	return new Uint32Array(bytes.buffer);
-}
 
 /**
  * Run-length encodes a cel. Pixel art is dominated by flat transparent and
@@ -215,7 +170,7 @@ export function fileBase(name: string): string {
 	return slug || "pixel-spell";
 }
 
-/** Serializes a project to the compact binary v2 container. */
+/** Serializes a project to the compact binary container. */
 export function serializeProject(
 	doc: PixelDoc,
 	palette: string[],
@@ -335,7 +290,7 @@ function normalizePalette(value: unknown): string[] | undefined {
 	return palette.length > 0 ? palette : undefined;
 }
 
-function parseProjectV2(bytes: Uint8Array): LoadedProject | null {
+function parseProjectBinary(bytes: Uint8Array): LoadedProject | null {
 	if (bytes.length < HEADER_SIZE) return null;
 	for (let index = 0; index < MAGIC.length; index++) {
 		if (bytes[index] !== MAGIC[index]) return null;
@@ -459,116 +414,17 @@ function parseProjectV2(bytes: Uint8Array): LoadedProject | null {
 	};
 }
 
-function parseProjectV1(raw: string): LoadedProject | null {
-	try {
-		const data = JSON.parse(raw) as Partial<SerializedProject>;
-		if (data.format !== "pixel-spell" || !Array.isArray(data.layers)) return null;
-
-		const width = clamp(Math.round(Number(data.width) || 0), 1, MAX_DIMENSION);
-		const height = clamp(Math.round(Number(data.height) || 0), 1, MAX_DIMENSION);
-		const frameCount = clamp(
-			Math.round(Number(data.frameCount) || 1),
-			1,
-			MAX_PROJECT_FRAMES,
-		);
-		const fps = clamp(Math.round(Number(data.fps) || 12), 1, 60);
-		const pixelCount = width * height;
-
-		if (data.layers.length > MAX_PROJECT_LAYERS) return null;
-		if (data.layers.some((layer) => !layer || typeof layer !== "object")) {
-			return null;
-		}
-		if (pixelCount * 4 * frameCount * data.layers.length > MAX_TOTAL_CEL_BYTES) {
-			return null;
-		}
-
-		const usedLayerIds = new Set<string>();
-		const layers: Layer[] = data.layers.map((rawLayer, index) => {
-			const cels = Array.from({ length: frameCount }, (_, frame) => {
-				const encoded = rawLayer?.cels?.[frame];
-				if (typeof encoded !== "string") {
-					throw new Error("Missing cel data");
-				}
-				return decodePixels(encoded, pixelCount);
-			});
-
-			let id =
-				typeof rawLayer?.id === "string" && rawLayer.id
-					? rawLayer.id
-					: uid("layer");
-			if (usedLayerIds.has(id)) id = uid("layer");
-			usedLayerIds.add(id);
-
-			return {
-				id,
-				name:
-					typeof rawLayer?.name === "string" && rawLayer.name.trim()
-						? rawLayer.name
-						: `Layer ${index + 1}`,
-				visible: rawLayer?.visible !== false,
-				locked: rawLayer?.locked === true,
-				opacity: clamp(Number(rawLayer?.opacity ?? 1), 0, 1),
-				cels,
-			};
-		});
-
-		if (layers.length === 0) return null;
-
-		const palette = normalizePalette(data.palette);
-
-		return {
-			doc: {
-				width,
-				height,
-				fps,
-				frames: Array.from({ length: frameCount }, () => ({ id: uid("frame") })),
-				layers,
-			},
-			palette,
-			activeFrame: clamp(
-				Math.round(Number(data.activeFrame) || 0),
-				0,
-				frameCount - 1,
-			),
-			activeLayerId:
-				typeof data.activeLayerId === "string" &&
-				layers.some((layer) => layer.id === data.activeLayerId)
-					? data.activeLayerId
-					: layers[0]!.id,
-			name: typeof data.name === "string" ? data.name : "Untitled",
-		};
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Parses a v2 binary project or a legacy v1 JSON project. Strings are always
- * treated as JSON so existing files keep working.
- */
+/** Parses a binary PXSP project. */
 export function parseProject(
-	raw: string | ArrayBuffer | Uint8Array,
+	raw: ArrayBuffer | Uint8Array,
 ): LoadedProject | null {
-	if (typeof raw === "string") return parseProjectV1(raw);
 	const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
-	if (bytes.length >= MAGIC.length) {
-		let isBinary = true;
-		for (let index = 0; index < MAGIC.length; index++) {
-			if (bytes[index] !== MAGIC[index]) {
-				isBinary = false;
-				break;
-			}
-		}
-		if (isBinary) {
-			try {
-				return parseProjectV2(bytes);
-			} catch {
-				return null;
-			}
-		}
+	if (bytes.length < HEADER_SIZE) return null;
+	for (let index = 0; index < MAGIC.length; index++) {
+		if (bytes[index] !== MAGIC[index]) return null;
 	}
 	try {
-		return parseProjectV1(new TextDecoder().decode(bytes));
+		return parseProjectBinary(bytes);
 	} catch {
 		return null;
 	}

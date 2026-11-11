@@ -411,7 +411,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept=".pixelspell,application/json,application/octet-stream"
+		accept=".pixelspell,application/octet-stream"
 		class="hidden"
 		onchange={handleFileChange}
 	/>
