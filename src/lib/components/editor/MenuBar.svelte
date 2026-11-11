@@ -62,12 +62,16 @@
 		input.value = "";
 		if (!file) return;
 
-		const project = await readProjectFile(file);
-		if (!project) {
-			window.alert("That file could not be opened as a Pixel Spell project.");
-			return;
+		try {
+			const project = await readProjectFile(file);
+			if (!project) {
+				window.alert("That file could not be opened as a Pixel Spell project.");
+				return;
+			}
+			editor.openProject(project);
+		} catch {
+			window.alert("That file could not be read. It may be corrupted or too large.");
 		}
-		editor.openProject(project);
 	}
 </script>
 
@@ -407,7 +411,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept=".pixelspell,application/json"
+		accept=".pixelspell,application/json,application/octet-stream"
 		class="hidden"
 		onchange={handleFileChange}
 	/>

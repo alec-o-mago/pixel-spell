@@ -9,7 +9,7 @@
 	import ZoomOut from "@lucide/svelte/icons/zoom-out";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
-	import { compositeFrame } from "$lib/editor/doc.js";
+	import { compositeFrameCached, compositePixel } from "$lib/editor/doc.js";
 	import {
 		blurPixels,
 		fillPixels,
@@ -30,7 +30,7 @@
 		shapeSelectionMask,
 		unionSelectionMasks,
 	} from "$lib/editor/selection.js";
-	import { drawScaled, pixelsToImageData } from "$lib/editor/render.js";
+	import { drawPixels, drawScaled } from "$lib/editor/render.js";
 	import { editor, type FloatingSelection } from "$lib/editor/editor.svelte.js";
 	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
 	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
@@ -61,6 +61,10 @@
 	let canvas: HTMLCanvasElement | undefined;
 	let overlayCanvas: HTMLCanvasElement | undefined;
 	let mirrorCanvas: HTMLCanvasElement | undefined;
+	let floatingCanvas: HTMLCanvasElement | null = null;
+	let mirrorCanvasHasContent = false;
+	/** Cached stage bounds; refreshed by the ResizeObserver. */
+	let stageRect = { left: 0, top: 0, width: 0, height: 0 };
 
 	let drawing = false;
 	let start: Point | null = null;
@@ -68,6 +72,8 @@
 	let backup: Uint32Array | null = null;
 	/** Packed color captured on pointer down, so the whole stroke stays consistent. */
 	let strokeColor = 0;
+	/** Mirror axes captured on pointer down; avoids rebuilding the array per pixel. */
+	let strokeMirrors: readonly MirrorAxis[] = [];
 	let gradientStartColor = 0;
 	let gradientEndColor = 0;
 	let gradientHistoryPushed = false;
@@ -169,10 +175,10 @@
 								? hoveringSelection
 									? "cursor-move"
 									: "cursor-crosshair"
-								: !isDrawable
-									? "cursor-not-allowed"
-									: editor.tool === "eyedropper"
-										? "cursor-copy"
+								: editor.tool === "eyedropper"
+									? "cursor-copy"
+									: !isDrawable
+										? "cursor-not-allowed"
 										: editor.tool === "fill"
 											? "cursor-cell"
 											: "cursor-crosshair",
@@ -192,11 +198,19 @@
 
 	$effect(() => {
 		if (!stage) return;
-		const observer = new ResizeObserver((entries) => {
-			const rect = entries[0]?.contentRect;
-			if (!rect) return;
+		const refresh = () => {
+			if (!stage) return;
+			const rect = stage.getBoundingClientRect();
+			stageRect = {
+				left: rect.left,
+				top: rect.top,
+				width: rect.width,
+				height: rect.height,
+			};
 			editor.viewport = { w: rect.width, h: rect.height };
-		});
+		};
+		refresh();
+		const observer = new ResizeObserver(refresh);
 		observer.observe(stage);
 		return () => observer.disconnect();
 	});
@@ -205,18 +219,23 @@
 		const doc = editor.doc;
 		const frame = editor.activeFrame;
 		const currentZoom = editor.effectiveZoom;
-		editor.revision;
+		const revision = editor.revision;
 
 		if (!canvas) return;
-		const pixels = compositeFrame(doc, frame);
-		drawScaled(
-			canvas,
-			pixels,
-			doc.width,
-			doc.height,
-			doc.width * currentZoom,
-			doc.height * currentZoom,
-		);
+		// Coalesce rapid pointer moves into one draw per animation frame.
+		const id = requestAnimationFrame(() => {
+			if (!canvas) return;
+			const pixels = compositeFrameCached(doc, frame, revision);
+			drawScaled(
+				canvas,
+				pixels,
+				doc.width,
+				doc.height,
+				doc.width * currentZoom,
+				doc.height * currentZoom,
+			);
+		});
+		return () => cancelAnimationFrame(id);
 	});
 
 	$effect(() => {
@@ -229,27 +248,36 @@
 		const hover = lassoHover;
 
 		if (!overlayCanvas) return;
-		const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-		const bufferWidth = Math.max(1, Math.round(doc.width * currentZoom * dpr));
-		const bufferHeight = Math.max(1, Math.round(doc.height * currentZoom * dpr));
-		if (overlayCanvas.width !== bufferWidth) overlayCanvas.width = bufferWidth;
-		if (overlayCanvas.height !== bufferHeight) overlayCanvas.height = bufferHeight;
+		const id = requestAnimationFrame(() => {
+			if (!overlayCanvas) return;
+			const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+			const bufferWidth = Math.max(1, Math.round(doc.width * currentZoom * dpr));
+			const bufferHeight = Math.max(1, Math.round(doc.height * currentZoom * dpr));
+			if (overlayCanvas.width !== bufferWidth) overlayCanvas.width = bufferWidth;
+			if (overlayCanvas.height !== bufferHeight) overlayCanvas.height = bufferHeight;
 
-		const context = overlayCanvas.getContext("2d");
-		if (!context) return;
-		drawOverlay(context, selection, floating, lasso, hover, doc.width, doc.height);
+			const context = overlayCanvas.getContext("2d");
+			if (!context) return;
+			drawOverlay(context, selection, floating, lasso, hover, doc.width, doc.height);
+		});
+		return () => cancelAnimationFrame(id);
 	});
 
 	$effect(() => {
-		editor.revision;
+		// Mirror guides depend on the axes and the view transform, not on pixel
+		// edits. Re-clearing the full-stage overlay on every brush stamp was a
+		// significant cost.
 		editor.viewport;
 		editor.panX;
 		editor.panY;
 		editor.rotation;
+		const axes = editor.mirrorAxes;
 		zoom;
 		canvasWidth;
 		canvasHeight;
-		drawMirrorOverlay();
+		if (axes.length === 0 && !mirrorCanvasHasContent) return;
+		const id = requestAnimationFrame(drawMirrorOverlay);
+		return () => cancelAnimationFrame(id);
 	});
 
 	$effect(() => {
@@ -274,6 +302,8 @@
 		if (tool !== "curve" && curvePhase !== "idle") finishCurve();
 	});
 
+	$effect(() => () => stopSpray());
+
 	$effect(() => {
 		editor.activeProjectId;
 		stopSpray();
@@ -285,6 +315,7 @@
 	$effect(() => {
 		editor.activeLayerId;
 		editor.activeFrame;
+		stopSpray();
 		if (curvePhase !== "idle") finishCurve();
 	});
 
@@ -300,7 +331,7 @@
 		clientY: number;
 	}): { x: number; y: number } | null {
 		if (!stage) return null;
-		const rect = stage.getBoundingClientRect();
+		const rect = stageRect;
 		if (rect.width === 0 || rect.height === 0) return null;
 
 		const centerX = rect.left + rect.width / 2 + editor.panX;
@@ -373,6 +404,14 @@
 	}
 
 	function mirrorAtEvent(event: PointerEvent): MirrorAxis | null {
+		if (
+			!editor.mirrorX &&
+			!editor.mirrorY &&
+			!editor.mirrorDiagonalDown &&
+			!editor.mirrorDiagonalUp
+		) {
+			return null;
+		}
 		const local = pointerToLocalCanvas(event);
 		if (!local || !stage) return null;
 
@@ -440,7 +479,7 @@
 			y,
 			editor.brushSize,
 			color,
-			editor.mirrorAxes,
+			strokeMirrors,
 			editor.selection,
 			editor.lockAlpha,
 		);
@@ -456,7 +495,7 @@
 			editor.sprayRadius,
 			count,
 			strokeColor,
-			editor.mirrorAxes,
+			strokeMirrors,
 			editor.selection,
 			editor.lockAlpha,
 		);
@@ -539,7 +578,7 @@
 				y,
 				editor.brushSize,
 				color,
-				editor.mirrorAxes,
+				strokeMirrors,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -551,7 +590,7 @@
 				x,
 				y,
 				color,
-				editor.mirrorAxes,
+				strokeMirrors,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -571,7 +610,11 @@
 		}
 	}
 
-	function drawGradient(cel: Uint32Array, end: Point): boolean {
+	function drawGradient(
+		cel: Uint32Array,
+		end: Point,
+		onFirstChange: () => void,
+	): boolean {
 		if (!backup || !start) return false;
 		cel.set(backup);
 
@@ -592,6 +635,7 @@
 			editor.gradientDither,
 			editor.selection,
 			editor.lockAlpha,
+			onFirstChange,
 		);
 	}
 
@@ -610,7 +654,7 @@
 				y,
 				editor.brushSize,
 				strokeColor,
-				editor.mirrorAxes,
+				strokeMirrors,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -717,7 +761,7 @@
 				point.y,
 				editor.brushSize,
 				color,
-				editor.mirrorAxes,
+				strokeMirrors,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -749,11 +793,11 @@
 
 	function pickColor(point: Point, slot: "primary" | "secondary"): void {
 		const frame = editor.activeFrame;
-		const source = editor.sampleAllLayers
-			? compositeFrame(editor.doc, frame)
-			: editor.activeLayer.cels[frame];
-		if (!source) return;
-		editor.setColorFromPacked(source[point.y * editor.doc.width + point.x] ?? 0, slot);
+		const value = editor.sampleAllLayers
+			? compositePixel(editor.doc, frame, point.x, point.y)
+			: editor.activeLayer.cels[frame]?.[point.y * editor.doc.width + point.x];
+		if (value === undefined) return;
+		editor.setColorFromPacked(value, slot);
 	}
 
 	function startPan(event: PointerEvent): void {
@@ -820,12 +864,12 @@
 		const nextZoom = Math.max(1, Math.min(64, oldZoom + direction));
 		if (nextZoom === oldZoom) return;
 
-		const stageRect = stage.getBoundingClientRect();
-		if (stageRect.width === 0 || stageRect.height === 0) return;
+		const rect = stageRect;
+		if (rect.width === 0 || rect.height === 0) return;
 
 		// Move the view to the midpoint between the pointer and the current center.
-		const stageCenterX = stageRect.left + stageRect.width / 2;
-		const stageCenterY = stageRect.top + stageRect.height / 2;
+		const stageCenterX = rect.left + rect.width / 2;
+		const stageCenterY = rect.top + rect.height / 2;
 		editor.panX = (editor.panX + (event.clientX - stageCenterX)) / 2;
 		editor.panY = (editor.panY + (event.clientY - stageCenterY)) / 2;
 		editor.zoom = nextZoom;
@@ -1024,22 +1068,19 @@
 		scaleX: number,
 		scaleY: number,
 	): void {
-		const source = document.createElement("canvas");
-		source.width = Math.max(1, floating.width);
-		source.height = Math.max(1, floating.height);
-		const sourceContext = source.getContext("2d");
-		if (!sourceContext) return;
-		sourceContext.putImageData(
-			pixelsToImageData(floating.pixels, floating.width, floating.height),
-			0,
-			0,
+		if (!floatingCanvas) floatingCanvas = document.createElement("canvas");
+		drawPixels(
+			floatingCanvas,
+			floating.pixels,
+			Math.max(1, floating.width),
+			Math.max(1, floating.height),
 		);
 
 		context.save();
 		context.globalAlpha = 0.5;
 		context.imageSmoothingEnabled = false;
 		context.drawImage(
-			source,
+			floatingCanvas,
 			floating.originX * scaleX,
 			floating.originY * scaleY,
 			floating.width * scaleX,
@@ -1071,29 +1112,73 @@
 		if (floating) drawFloatingPixels(context, floating, scaleX, scaleY);
 
 		if (selection) {
+			// Trace horizontal runs instead of testing four neighbors for every
+			// selected pixel. Large selections produce far fewer path segments.
+			const emitHorizontal = (
+				rowStart: number,
+				runStart: number,
+				runEnd: number,
+				neighborOffset: number,
+				edgeY: number,
+			) => {
+				let segmentStart = -1;
+				for (let px = runStart; px <= runEnd; px++) {
+					const covered =
+						neighborOffset !== 0 &&
+						selection[rowStart + neighborOffset + px] === 1;
+					if (!covered) {
+						if (segmentStart < 0) segmentStart = px;
+					} else if (segmentStart >= 0) {
+						context.moveTo(segmentStart * scaleX, edgeY);
+						context.lineTo(px * scaleX, edgeY);
+						segmentStart = -1;
+					}
+				}
+				if (segmentStart >= 0) {
+					context.moveTo(segmentStart * scaleX, edgeY);
+					context.lineTo((runEnd + 1) * scaleX, edgeY);
+				}
+			};
+
 			context.beginPath();
 			for (let y = 0; y < docHeight; y++) {
-				for (let x = 0; x < docWidth; x++) {
-					const index = y * docWidth + x;
-					if (!selection[index]) continue;
-					const x0 = x * scaleX;
-					const x1 = (x + 1) * scaleX;
-					const y0 = y * scaleY;
-					const y1 = (y + 1) * scaleY;
+				const rowStart = y * docWidth;
+				const y0 = y * scaleY;
+				const y1 = (y + 1) * scaleY;
+				let x = 0;
+				while (x < docWidth) {
+					if (!selection[rowStart + x]) {
+						x++;
+						continue;
+					}
+					const runStart = x;
+					while (x < docWidth && selection[rowStart + x]) x++;
+					const runEnd = x - 1;
+					const x0 = runStart * scaleX;
+					const x1 = (runEnd + 1) * scaleX;
 
-					if (y === 0 || !selection[index - docWidth]) {
-						context.moveTo(x0, y0);
-						context.lineTo(x1, y0);
-					}
-					if (y === docHeight - 1 || !selection[index + docWidth]) {
-						context.moveTo(x0, y1);
-						context.lineTo(x1, y1);
-					}
-					if (x === 0 || !selection[index - 1]) {
+					// Emit only the parts of the run whose neighbor is unselected,
+					// merging contiguous spans into one path segment.
+					emitHorizontal(
+						rowStart,
+						runStart,
+						runEnd,
+						y === 0 ? 0 : -docWidth,
+						y0,
+					);
+					emitHorizontal(
+						rowStart,
+						runStart,
+						runEnd,
+						y === docHeight - 1 ? 0 : docWidth,
+						y1,
+					);
+
+					if (runStart === 0 || !selection[rowStart + runStart - 1]) {
 						context.moveTo(x0, y0);
 						context.lineTo(x0, y1);
 					}
-					if (x === docWidth - 1 || !selection[index + 1]) {
+					if (runEnd === docWidth - 1 || !selection[rowStart + runEnd + 1]) {
 						context.moveTo(x1, y0);
 						context.lineTo(x1, y1);
 					}
@@ -1148,8 +1233,11 @@
 	/** Draw mirror guides across the whole stage, not just over the sprite. */
 	function drawMirrorOverlay(): void {
 		if (!mirrorCanvas || !stage) return;
+		const axes = editor.mirrorAxes;
+		// The common case (no mirror guides) must not touch the full-stage
+		// canvas while panning or zooming.
+		if (axes.length === 0 && !mirrorCanvasHasContent) return;
 
-		const stageRect = stage.getBoundingClientRect();
 		const width = Math.max(1, Math.round(stageRect.width));
 		const height = Math.max(1, Math.round(stageRect.height));
 		const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
@@ -1159,16 +1247,21 @@
 		if (mirrorCanvas.width !== bufferWidth || mirrorCanvas.height !== bufferHeight) {
 			mirrorCanvas.width = bufferWidth;
 			mirrorCanvas.height = bufferHeight;
+			mirrorCanvasHasContent = false;
 		}
 
 		const context = mirrorCanvas.getContext("2d");
 		if (!context) return;
 
+		if (axes.length === 0) {
+			context.setTransform(1, 0, 0, 1, 0, 0);
+			context.clearRect(0, 0, bufferWidth, bufferHeight);
+			mirrorCanvasHasContent = false;
+			return;
+		}
+
 		context.setTransform(1, 0, 0, 1, 0, 0);
 		context.clearRect(0, 0, bufferWidth, bufferHeight);
-
-		const axes = editor.mirrorAxes;
-		if (axes.length === 0) return;
 
 		const scale = editor.effectiveZoom;
 		const centerX = width / 2 + editor.panX;
@@ -1203,6 +1296,7 @@
 		context.strokeStyle = "rgba(14, 165, 233, 0.95)";
 		context.stroke();
 		context.setLineDash([]);
+		mirrorCanvasHasContent = true;
 	}
 
 	function handlePointerDown(event: PointerEvent): void {
@@ -1311,7 +1405,8 @@
 		}
 
 		if (tool === "eyedropper") {
-			if (!isDrawable) return;
+			// Picking is read-only, so it works even when the active layer is
+			// locked or hidden.
 			pickColor(point, secondary ? "secondary" : "primary");
 			return;
 		}
@@ -1326,6 +1421,7 @@
 			if (curvePhase === "idle") {
 				if (editor.selection && !isPointSelected(point)) return;
 				strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
+				strokeMirrors = editor.mirrorAxes;
 				curveStart = point;
 				curveEnd = point;
 				curveControl1 = point;
@@ -1349,11 +1445,15 @@
 
 		if (editor.selection && !isPointSelected(point)) return;
 		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
+		strokeMirrors = editor.mirrorAxes;
 		gradientStartColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 		gradientEndColor = secondary ? editor.currentColor : editor.secondaryCurrentColor;
 
 		if (tool === "fill") {
-			editor.pushHistory();
+			// Apply pending floating content first so the fill region is computed
+			// against the final pixels, then only record history if something
+			// actually changes.
+			if (editor.floating) editor.commitFloatingSelection();
 			const tolerance = Math.round((editor.fillTolerance / 100) * 255);
 			const changed = fillPixels(
 				cel,
@@ -1366,6 +1466,7 @@
 				editor.fillContiguous,
 				editor.selection,
 				editor.lockAlpha,
+				() => editor.pushHistoryCel(layer.id, editor.activeFrame),
 			);
 			if (changed) editor.touch();
 			return;
@@ -1384,7 +1485,7 @@
 			return;
 		}
 
-		editor.pushHistory();
+		editor.pushHistoryCel(layer.id, editor.activeFrame);
 		backup = new Uint32Array(cel);
 		drawing = true;
 		start = point;
@@ -1393,12 +1494,10 @@
 		strokePath = strokePixelPerfect ? [point] : [];
 
 		if (tool === "spray") {
-			sprayAt(cel, point, 1);
+			if (sprayAt(cel, point, 1)) editor.touch();
 			startSpray();
-			editor.touch();
 		} else if (tool === "blur" || tool === "jumble") {
-			applyAreaTool(cel, point);
-			editor.touch();
+			if (applyAreaTool(cel, point)) editor.touch();
 		} else if (tool === "pencil" || tool === "eraser") {
 			paintAt(cel, point.x, point.y);
 			editor.touch();
@@ -1459,7 +1558,7 @@
 				if (!curveEnd || curveEnd.x !== point.x || curveEnd.y !== point.y) {
 					curveEnd = point;
 					if (!curveHistoryPushed) {
-						editor.pushHistory();
+						editor.pushHistoryCel(editor.activeLayerId, editor.activeFrame);
 						curveHistoryPushed = true;
 					}
 					const cel = editor.activeLayer.cels[editor.activeFrame];
@@ -1494,6 +1593,7 @@
 		const cel = layer.cels[editor.activeFrame];
 		if (!cel) return;
 
+		let changed = false;
 		if (editor.tool === "pencil" || editor.tool === "eraser") {
 			if (strokePixelPerfect) {
 				updatePixelPerfectStroke(cel, point);
@@ -1502,26 +1602,29 @@
 				plotLine(from.x, from.y, point.x, point.y, (x, y) => paintAt(cel, x, y));
 				last = point;
 			}
+			changed = true;
 		} else if (editor.tool === "spray") {
+			// The spray timer paints while the pointer is held still.
 			last = point;
 		} else if (editor.tool === "blur" || editor.tool === "jumble") {
 			if (!last || last.x !== point.x || last.y !== point.y) {
 				last = point;
-				applyAreaTool(cel, point);
+				changed = applyAreaTool(cel, point);
 			}
 		} else if (editor.tool === "gradient") {
 			if (!last || last.x !== point.x || last.y !== point.y) {
-				if (!gradientHistoryPushed) {
-					editor.pushHistory();
-					gradientHistoryPushed = true;
-				}
 				last = point;
-				drawGradient(cel, point);
+				changed = drawGradient(cel, point, () => {
+					if (gradientHistoryPushed) return;
+					editor.pushHistoryCel(editor.activeLayerId, editor.activeFrame);
+					gradientHistoryPushed = true;
+				});
 			}
 		} else {
 			drawShape(cel, point);
+			changed = true;
 		}
-		editor.touch();
+		if (changed) editor.touch();
 	}
 
 	function handlePointerUp(event: PointerEvent): void {
@@ -1592,6 +1695,7 @@
 			strokePath = [];
 			strokePixelPerfect = false;
 			gradientHistoryPushed = false;
+			strokeMirrors = [];
 			if (commit) editor.touch();
 		}
 		releasePointer(event);

@@ -112,6 +112,18 @@
 	function handleKeydown(event: KeyboardEvent): void {
 		if (isTypingTarget(event.target)) return;
 
+		const element = event.target as HTMLElement | null;
+		// Let focused buttons and links handle Space/Enter themselves instead
+		// of also toggling playback or a tool.
+		if (
+			(element?.tagName === "BUTTON" || element?.tagName === "A") &&
+			(event.key === " " || event.key === "Enter")
+		) {
+			return;
+		}
+		// A dialog owns its own keyboard interactions.
+		if (element instanceof Element && element.closest('[role="dialog"]')) return;
+
 		const modifier = event.ctrlKey || event.metaKey;
 		const key = event.key.toLowerCase();
 
@@ -185,6 +197,7 @@
 
 		if (event.key === " ") {
 			event.preventDefault();
+			if (event.repeat) return;
 			editor.togglePlayback();
 			return;
 		}

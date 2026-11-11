@@ -35,7 +35,7 @@
 		if (frameCount <= 1) return;
 
 		const interval = window.setInterval(() => {
-			editor.activeFrame = (editor.activeFrame + 1) % frameCount;
+			editor.selectFrame((editor.activeFrame + 1) % frameCount);
 		}, 1000 / fps);
 
 		return () => window.clearInterval(interval);

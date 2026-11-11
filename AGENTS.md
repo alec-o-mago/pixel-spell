@@ -22,6 +22,8 @@ Use `npm run check` after any non-trivial change. Run `npm run build` before dec
 ## Project layout
 
 ```
+bench/                         # Deterministic core benchmarks (npm run bench)
+docs/                          # Screenshot, performance notes, planned features
 src/
 ├── App.svelte                 # Shell, layout, global keyboard shortcuts, theme effect
 ├── main.ts                    # Svelte mount
@@ -61,9 +63,14 @@ Key files:
 - The singleton is exported as `editor` from `editor.svelte.ts`. **Do not rename it back to `state`**: a local binding named `state` conflicts with the `$state` rune and breaks compilation.
 - `editor.doc` is a `$state` proxy, so layer names, visibility, opacity, frame arrays, etc. are reactive.
 - Pixel data lives in `Uint32Array` cels. Typed arrays are **not** deeply proxied, so mutating pixels will not trigger a re-render on its own. Call `editor.touch()` (increments `revision`) after changing pixel data, or increment `editor.revision` after structural changes that do not already do so.
-- Any mutation that should be undoable must call `editor.pushHistory()` **before** the change. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
-- `editor.revision` is the render invalidation signal. `CanvasStage` and `CelThumb` read it inside `$effect`.
-- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrame()` or a full sprite redraw.
+- Any mutation that should be undoable must record history **before** the change: `pushHistoryCel`/`pushHistoryCels` for pixel edits and `pushHistory` for structural edits. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
+- `editor.revision` is the render invalidation signal. `CanvasStage`, `Preview`, and the active `CelThumb` read it inside `$effect`.
+- `editor.structureRevision` changes only when layers/frames are added, removed, reordered, or restored by undo/redo or a project switch. `CelThumb` redraws all cells on `structureRevision` but only the active cell on `revision`.
+- Pixel edits use `editor.pushHistoryCel(layerId, frame)` and structural edits use `editor.pushHistory()`. Do not use `pushHistory()` for a brush stroke: it clones every layer and frame. `pushHistoryCels` records several cels at once (for example, clearing a frame).
+- `compositeFrameCached(doc, frame, revision)` memoizes up to eight frames and returns a shared read-only buffer. Use it for viewport/preview rendering; use `compositeFrame` when a caller may need to own or mutate the buffer.
+- `render.ts` reuses a scratch canvas/ImageData and exposes `drawPixels`, `drawScaled`, and `drawThumbnail`. Do not allocate a new canvas per draw.
+- `CanvasStage` coalesces sprite, overlay, and mirror draws into `requestAnimationFrame`. Keep that behavior when adding render paths.
+- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrameCached()` or a full sprite redraw.
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
 
 ## Projects and tabs
@@ -159,11 +166,12 @@ Preserve these regions and their relative placement when making changes.
 
 ## Persistence and files
 
-- Project format identifier: `"pixel-spell"`, version `1`; project files use the `.pixelspell` extension with JSON content.
-- `serializeProject` stores cels as base64; `parseProject` validates dimensions, frame count, layer data, and palette. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
+- Project files use the `.pixelspell` extension and a binary `PXSP` version 2 container. The header stores dimensions, fps, frame/layer counts, and a UTF-8 JSON metadata block (name, palette, active frame/layer, layer flags). Each cel is stored as raw little-endian RGBA or RLE, whichever is smaller.
+- `serializeProject` returns a `Uint8Array`; `parseProject` accepts a v2 `Uint8Array`/`ArrayBuffer` or a legacy v1 JSON string. `readProjectFile` reads `arrayBuffer()`. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
+- Parsing enforces 1–1024 px per side, at most 1024 layers, at most 1000 frames, a 512 MB cel budget, and a 256-color palette. Duplicate layer ids are regenerated so lookups stay unambiguous. Saving throws if a project exceeds the layer/frame limits.
 - Layer visibility, opacity, and lock state are serialized with each layer. Older files without a `locked` field load as unlocked.
 - Opening a project file creates a new tab; saving applies to the active project only.
-- PNG export uses `canvas.toDataURL`; sprite sheets place frames horizontally.
+- Image export uses `canvas.toBlob`; sprite sheets support horizontal, vertical, and grid layouts.
 - `editor.saveToFile()` triggers a browser download and clears the dirty flag.
 
 ## Gotchas
@@ -176,7 +184,10 @@ Preserve these regions and their relative placement when making changes.
 - `setPointerCapture` is wrapped in `try/catch` so synthetic pointer events (used in automated browser checks) do not throw.
 - The file input in `MenuBar.svelte` is hidden. It is opened via `File → Open project…`.
 - `$effect` in `TimelinePanel.svelte` drives playback with `setInterval`; it depends on `editor.playing`, `editor.doc.fps`, and `editor.doc.frames.length`. If you add playback features, keep cleanup in the effect return.
-- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas.
+- The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas. Mirror toggles/positions intentionally do **not** increment `revision`; the mirror overlay effect tracks the mirror state directly.
+- `CanvasStage` caches the stage bounding rect in `stageRect` (updated by its `ResizeObserver`) instead of calling `getBoundingClientRect()` for every pointer event.
+- `editor.touch()` invalidates `compositeFrameCached`; changes that do not affect pixels (pan, zoom, rotation, mirror guides) must not call it. `editor.selectLayer`/`selectFrame` also do not invalidate pixels.
+- `CelThumb` keeps `drawnStructure`/`drawnRevision`. It redraws on `structureRevision` and on `revision` only while that cell is the active layer/frame. Do not make it read `editor.revision` unconditionally; that redraws every thumbnail on every brush stamp.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Custom palettes are workspace preferences stored in `localStorage` under `pixel-spell-palettes`; the built-in palette always has id `default` and is never persisted or editable. Custom palettes are capped at 256 colors and new ones start empty.
@@ -186,6 +197,7 @@ Preserve these regions and their relative placement when making changes.
 
 - `npm run check` passes with zero errors/warnings.
 - `npm run build` succeeds.
+- `npm run bench` completes without assertion failures (it also verifies v2/v1 project round-trips).
 - Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Project tabs switch correctly with independent documents, undo history, zoom, and dirty state; closing a dirty project confirms first.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.

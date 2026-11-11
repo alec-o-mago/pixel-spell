@@ -522,9 +522,24 @@ const BAYER_PATTERNS: Record<Exclude<GradientDither, "none">, BayerPattern> = {
 	},
 };
 
+interface RegionMask {
+	mask: Uint8Array;
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+}
+
+const REGION_UNVISITED = 0;
+const REGION_QUEUED = 1;
+const REGION_REJECTED = 2;
+const REGION_MATCH = 3;
+
 /**
  * Builds the same region a fill would affect: a matching connected area, or
- * every matching pixel when `contiguous` is false.
+ * every matching pixel when `contiguous` is false. The mask also reports its
+ * bounds so callers only touch the affected rectangle instead of the whole
+ * canvas (important for large documents and gradient previews).
  */
 function matchingRegionMask(
 	cel: Uint32Array,
@@ -536,7 +551,7 @@ function matchingRegionMask(
 	contiguous: boolean,
 	clip: Uint8Array | null,
 	lockAlpha: boolean,
-): Uint8Array | null {
+): RegionMask | null {
 	if (x < 0 || x >= width || y < 0 || y >= height) return null;
 
 	const startIndex = y * width + x;
@@ -545,39 +560,91 @@ function matchingRegionMask(
 
 	const target = cel[startIndex]!;
 	const mask = new Uint8Array(width * height);
+	let minX = width;
+	let minY = height;
+	let maxX = -1;
+	let maxY = -1;
 
 	if (!contiguous) {
 		for (let index = 0; index < cel.length; index++) {
 			if (clip && !clip[index]) continue;
 			if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
-			if (colorMatches(cel[index]!, target, tolerance)) mask[index] = 1;
+			if (!colorMatches(cel[index]!, target, tolerance)) continue;
+			mask[index] = REGION_MATCH;
+			const px = index % width;
+			const py = (index - px) / width;
+			if (px < minX) minX = px;
+			if (px > maxX) maxX = px;
+			if (py < minY) minY = py;
+			if (py > maxY) maxY = py;
 		}
-		return mask;
+		if (maxX < minX) return null;
+		return { mask, minX, minY, maxX, maxY };
 	}
 
-	const visited = new Uint8Array(width * height);
+	// Every pixel is queued at most once, so the stack only holds the current
+	// frontier instead of growing to several times the pixel count.
 	const stack: number[] = [startIndex];
+	mask[startIndex] = REGION_QUEUED;
 
 	while (stack.length > 0) {
 		const index = stack.pop()!;
-		if (visited[index]) continue;
-		visited[index] = 1;
-		if (clip && !clip[index]) continue;
-		if (lockAlpha && (cel[index]! >>> 24) === 0) continue;
-		if (!colorMatches(cel[index]!, target, tolerance)) continue;
+		if (mask[index] !== REGION_QUEUED) continue;
 
-		mask[index] = 1;
+		if (clip && !clip[index]) {
+			mask[index] = REGION_REJECTED;
+			continue;
+		}
+		if (lockAlpha && (cel[index]! >>> 24) === 0) {
+			mask[index] = REGION_REJECTED;
+			continue;
+		}
+		if (!colorMatches(cel[index]!, target, tolerance)) {
+			mask[index] = REGION_REJECTED;
+			continue;
+		}
 
+		mask[index] = REGION_MATCH;
 		const px = index % width;
 		const py = (index - px) / width;
+		if (px < minX) minX = px;
+		if (px > maxX) maxX = px;
+		if (py < minY) minY = py;
+		if (py > maxY) maxY = py;
 
-		if (px > 0) stack.push(index - 1);
-		if (px < width - 1) stack.push(index + 1);
-		if (py > 0) stack.push(index - width);
-		if (py < height - 1) stack.push(index + width);
+		if (px > 0) {
+			const next = index - 1;
+			if (mask[next] === REGION_UNVISITED) {
+				mask[next] = REGION_QUEUED;
+				stack.push(next);
+			}
+		}
+		if (px < width - 1) {
+			const next = index + 1;
+			if (mask[next] === REGION_UNVISITED) {
+				mask[next] = REGION_QUEUED;
+				stack.push(next);
+			}
+		}
+		if (py > 0) {
+			const next = index - width;
+			if (mask[next] === REGION_UNVISITED) {
+				mask[next] = REGION_QUEUED;
+				stack.push(next);
+			}
+		}
+		if (py < height - 1) {
+			const next = index + width;
+			if (mask[next] === REGION_UNVISITED) {
+				mask[next] = REGION_QUEUED;
+				stack.push(next);
+			}
+		}
 	}
 
-	return mask;
+	if (maxX < minX) return null;
+	// Callers expect 1 for selected pixels; REGION_MATCH is the internal code.
+	return { mask, minX, minY, maxX, maxY };
 }
 
 /** Flood fill (contiguous) or global replace (non-contiguous). */
@@ -592,6 +659,7 @@ export function fillPixels(
 	contiguous: boolean,
 	clip: Uint8Array | null = null,
 	lockAlpha = false,
+	onFirstChange?: () => void,
 ): boolean {
 	if (x < 0 || x >= width || y < 0 || y >= height) return false;
 
@@ -602,7 +670,7 @@ export function fillPixels(
 	const target = cel[startIndex];
 	if (target === color) return false;
 
-	const mask = matchingRegionMask(
+	const region = matchingRegionMask(
 		cel,
 		width,
 		height,
@@ -613,13 +681,21 @@ export function fillPixels(
 		clip,
 		lockAlpha,
 	);
-	if (!mask) return false;
+	if (!region) return false;
 
+	const { mask, minX, minY, maxX, maxY } = region;
 	let changed = false;
-	for (let index = 0; index < mask.length; index++) {
-		if (!mask[index] || cel[index] === color) continue;
-		cel[index] = color;
-		changed = true;
+	for (let py = minY; py <= maxY; py++) {
+		const row = py * width;
+		for (let px = minX; px <= maxX; px++) {
+			const index = row + px;
+			if (mask[index] !== REGION_MATCH || cel[index] === color) continue;
+			if (!changed) {
+				onFirstChange?.();
+				changed = true;
+			}
+			cel[index] = color;
+		}
 	}
 	return changed;
 }
@@ -669,13 +745,14 @@ export function gradientPixels(
 	dither: GradientDither,
 	clip: Uint8Array | null = null,
 	lockAlpha = false,
+	onFirstChange?: () => void,
 ): boolean {
 	const deltaX = endX - startX;
 	const deltaY = endY - startY;
 	const lengthSquared = deltaX * deltaX + deltaY * deltaY;
 	if (lengthSquared === 0) return false;
 
-	const mask = matchingRegionMask(
+	const region = matchingRegionMask(
 		cel,
 		width,
 		height,
@@ -686,23 +763,26 @@ export function gradientPixels(
 		clip,
 		lockAlpha,
 	);
-	if (!mask) return false;
+	if (!region) return false;
 
+	const { mask, minX, minY, maxX, maxY } = region;
 	const radius = Math.sqrt(lengthSquared);
 	const pattern = dither === "none" ? null : BAYER_PATTERNS[dither];
 	let changed = false;
 
-	for (let y = 0; y < height; y++) {
-		for (let x = 0; x < width; x++) {
+	for (let y = minY; y <= maxY; y++) {
+		for (let x = minX; x <= maxX; x++) {
 			const index = y * width + x;
-			if (!mask[index]) continue;
+			if (mask[index] !== REGION_MATCH) continue;
 
 			let amount: number;
 			if (shape === "linear") {
 				amount =
 					((x - startX) * deltaX + (y - startY) * deltaY) / lengthSquared;
 			} else {
-				amount = Math.hypot(x - startX, y - startY) / radius;
+				const dx = x - startX;
+				const dy = y - startY;
+				amount = Math.sqrt(dx * dx + dy * dy) / radius;
 			}
 			amount = Math.max(0, Math.min(1, amount));
 
@@ -718,6 +798,7 @@ export function gradientPixels(
 			}
 
 			if (cel[index] === next) continue;
+			if (!changed) onFirstChange?.();
 			cel[index] = next;
 			changed = true;
 		}
@@ -793,12 +874,27 @@ export function blurPixels(
 	if (strength <= 0) return false;
 
 	// Read every sample from an untouched snapshot so a single pass cannot
-	// feed its own output back into the kernel.
-	const source = new Uint32Array(cel);
+	// feed its own output back into the kernel. Only the affected window plus a
+	// one-pixel kernel border is copied; a full-canvas copy made every pointer
+	// move allocate and touch the entire cel.
 	const minX = Math.max(0, centerX - span);
 	const maxX = Math.min(width - 1, centerX + span);
 	const minY = Math.max(0, centerY - span);
 	const maxY = Math.min(height - 1, centerY + span);
+	const sourceMinX = Math.max(0, minX - 1);
+	const sourceMaxX = Math.min(width - 1, maxX + 1);
+	const sourceMinY = Math.max(0, minY - 1);
+	const sourceMaxY = Math.min(height - 1, maxY + 1);
+	const sourceWidth = sourceMaxX - sourceMinX + 1;
+	const sourceHeight = sourceMaxY - sourceMinY + 1;
+	const source = new Uint32Array(sourceWidth * sourceHeight);
+	for (let y = 0; y < sourceHeight; y++) {
+		const sourceRow = (sourceMinY + y) * width + sourceMinX;
+		source.set(
+			cel.subarray(sourceRow, sourceRow + sourceWidth),
+			y * sourceWidth,
+		);
+	}
 	const radiusSquared = span * span;
 	let changed = false;
 
@@ -811,7 +907,8 @@ export function blurPixels(
 			const index = y * width + x;
 			if (clip && !clip[index]) continue;
 
-			const original = source[index]!;
+			const localIndex = (y - sourceMinY) * sourceWidth + (x - sourceMinX);
+			const original = source[localIndex]!;
 			const originalAlpha = original >>> 24;
 			if (lockAlpha && originalAlpha === 0) continue;
 
@@ -823,13 +920,15 @@ export function blurPixels(
 			for (let kernelY = -1; kernelY <= 1; kernelY++) {
 				const sampleY = y + kernelY;
 				if (sampleY < 0 || sampleY >= height) continue;
+				const localRow = (sampleY - sourceMinY) * sourceWidth;
 				for (let kernelX = -1; kernelX <= 1; kernelX++) {
 					const sampleX = x + kernelX;
 					if (sampleX < 0 || sampleX >= width) continue;
 
 					const weight =
 						BLUR_WEIGHTS[(kernelY + 1) * 3 + (kernelX + 1)]!;
-					const sample = source[sampleY * width + sampleX]!;
+					const sample =
+						source[localRow + (sampleX - sourceMinX)]!;
 					const alpha = sample >>> 24;
 					if (alpha === 0) continue;
 

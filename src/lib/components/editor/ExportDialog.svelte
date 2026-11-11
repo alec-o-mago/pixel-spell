@@ -11,7 +11,7 @@
 	import { Label } from "$lib/components/ui/label/index.js";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
-	import { compositeFrame } from "$lib/editor/doc.js";
+	import { compositeFrameCached } from "$lib/editor/doc.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import {
 		EXPORT_FORMATS,
@@ -31,7 +31,7 @@
 		type ExportTabId,
 		type SheetLayout,
 	} from "$lib/editor/export.js";
-	import { drawScaled, pixelsToImageData } from "$lib/editor/render.js";
+	import { drawPixels, drawScaled } from "$lib/editor/render.js";
 	import { cn } from "$lib/utils.js";
 
 	let { open = $bindable(false) } = $props();
@@ -243,16 +243,13 @@
 		context.imageSmoothingEnabled = false;
 
 		const source = document.createElement("canvas");
-		source.width = doc.width;
-		source.height = doc.height;
-		const sourceContext = source.getContext("2d");
-		if (!sourceContext) return;
 
 		for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
-			sourceContext.putImageData(
-				pixelsToImageData(compositeFrame(doc, frameIndex), doc.width, doc.height),
-				0,
-				0,
+			drawPixels(
+				source,
+				compositeFrameCached(doc, frameIndex, editor.revision),
+				doc.width,
+				doc.height,
 			);
 			const column = frameIndex % geometry.columns;
 			const row = Math.floor(frameIndex / geometry.columns);
@@ -280,7 +277,10 @@
 
 		if (tab === "image") {
 			const frame = Math.max(0, Math.min(imageFrame, doc.frames.length - 1));
-			const pixels = flattenPixels(compositeFrame(doc, frame), imageBackground);
+			const pixels = flattenPixels(
+				compositeFrameCached(doc, frame, editor.revision),
+				imageBackground,
+			);
 			drawPixelPreview(canvas, pixels, doc.width, doc.height);
 			return;
 		}
@@ -302,7 +302,10 @@
 		let frameIndex = 0;
 		const draw = (): void => {
 			const frame = frameIndex % frameCount;
-			const pixels = flattenPixels(compositeFrame(doc, frame), gifBackground);
+			const pixels = flattenPixels(
+				compositeFrameCached(doc, frame, editor.revision),
+				gifBackground,
+			);
 			drawPixelPreview(canvas, pixels, doc.width, doc.height);
 			frameIndex = (frameIndex + 1) % frameCount;
 		};

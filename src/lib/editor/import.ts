@@ -26,6 +26,9 @@ export const IMPORT_ACCEPT = [...IMAGE_IMPORT_EXTENSIONS, ...PALETTE_EXTENSIONS]
 /** Imported images are cropped to this many pixels in each dimension. */
 export const MAX_IMPORT_DIMENSION = 1024;
 
+/** Reject huge files before decoding them in memory. */
+export const MAX_IMPORT_FILE_BYTES = 64 * 1024 * 1024;
+
 /**
  * Palette extraction is exact for normal-sized images. Very large images are
  * sampled down so a single import cannot lock up the tab. Bands span the full
@@ -184,9 +187,13 @@ function readProjectPixels(
 	context.drawImage(source, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
 	const image = context.getImageData(0, 0, cropWidth, cropHeight);
-	const pixels = new Uint32Array(cropWidth * cropHeight);
-	const view = new Uint32Array(image.data.buffer, image.data.byteOffset, pixels.length);
-	pixels.set(view);
+	// The ImageData buffer is local to this function and already exactly the
+	// size we need, so return a view instead of copying it a second time.
+	const pixels = new Uint32Array(
+		image.data.buffer,
+		image.data.byteOffset,
+		cropWidth * cropHeight,
+	);
 
 	return { width: cropWidth, height: cropHeight, pixels };
 }
@@ -377,6 +384,15 @@ function parseHexPalette(text: string): ParsedPalette | null {
  * imported. Files that are not supported return no tabs and an error message.
  */
 export async function analyzeImportFile(file: File): Promise<ImportAnalysis> {
+	if (file.size > MAX_IMPORT_FILE_BYTES) {
+		return {
+			fileName: file.name,
+			project: null,
+			palette: null,
+			error: `This file is larger than ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB. Choose a smaller image or palette.`,
+		};
+	}
+
 	const extension = resolvedExtension(file);
 	const isImage = IMAGE_EXTENSIONS.has(extension);
 	const isPalette = PALETTE_EXTENSIONS.has(extension);

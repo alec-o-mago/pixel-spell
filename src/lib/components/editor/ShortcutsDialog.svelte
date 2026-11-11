@@ -42,6 +42,7 @@
 				{ label: "Copy selection", keys: "Ctrl C" },
 				{ label: "Paste selection", keys: "Ctrl V" },
 				{ label: "Delete selection", keys: "Delete" },
+				{ label: "Deselect", keys: "Esc" },
 			],
 		},
 	];

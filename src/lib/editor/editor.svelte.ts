@@ -1,6 +1,11 @@
 import { isTransparent, normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
-import { saveProjectFile, type LoadedProject } from "./file.js";
+import {
+	MAX_PROJECT_FRAMES,
+	MAX_PROJECT_LAYERS,
+	saveProjectFile,
+	type LoadedProject,
+} from "./file.js";
 import { selectionBounds } from "./selection.js";
 import {
 	DEFAULT_PALETTE_ID,
@@ -27,6 +32,8 @@ import type {
 } from "./types.js";
 
 const HISTORY_LIMIT = 80;
+/** Keep undo history bounded even for very large documents. */
+const HISTORY_BYTE_LIMIT = 128 * 1024 * 1024;
 const MIN_SIZE = 1;
 const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
@@ -43,6 +50,21 @@ function readStoredTheme(): "light" | "dark" {
 	}
 }
 
+interface CelPatch {
+	layerId: string;
+	frame: number;
+	pixels: Uint32Array;
+}
+
+/**
+ * History entries are either a full document clone (structural edits) or one
+ * or more previous cel buffers (pixel edits). Pixel edits are the common case,
+ * so this avoids cloning every layer and frame on every brush stroke.
+ */
+type HistoryEntry =
+	| { kind: "full"; doc: PixelDoc }
+	| { kind: "cels"; patches: CelPatch[] };
+
 interface ProjectSnapshot {
 	doc: PixelDoc;
 	activeLayerId: string;
@@ -52,8 +74,10 @@ interface ProjectSnapshot {
 	panY: number;
 	rotation: number;
 	selection: Uint8Array | null;
-	undo: PixelDoc[];
-	redo: PixelDoc[];
+	undo: HistoryEntry[];
+	redo: HistoryEntry[];
+	undoBytes: number;
+	redoBytes: number;
 }
 
 /** In-memory copy of selected pixels, independent of the OS clipboard. */
@@ -153,6 +177,8 @@ export class EditorState {
 	/** Last cursor position over the canvas, kept for the menu bar readout. */
 	lastCursor = $state<Point | null>(null);
 	revision = $state(0);
+	/** Increments when layers/frames are added, removed, reordered, or restored. */
+	structureRevision = $state(0);
 	dirty = $state(false);
 	modified = $state(false);
 	name = $state("Untitled");
@@ -165,8 +191,10 @@ export class EditorState {
 	/** Increments only when undo/redo restores a document. */
 	historyActionRevision = $state(0);
 
-	#undo: PixelDoc[] = [];
-	#redo: PixelDoc[] = [];
+	#undo: HistoryEntry[] = [];
+	#redo: HistoryEntry[] = [];
+	#undoBytes = 0;
+	#redoBytes = 0;
 	#states = new Map<string, ProjectSnapshot>();
 	#clipboard: SelectionClipboard | null = null;
 
@@ -192,6 +220,8 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 
 		const paletteState = loadPaletteState();
@@ -422,7 +452,7 @@ export class EditorState {
 		const cel = layer?.cels[floating.frame];
 		if (!cel) return false;
 
-		this.pushHistory();
+		this.pushHistoryCel(floating.layerId, floating.frame);
 
 		const width = this.doc.width;
 		const height = this.doc.height;
@@ -520,7 +550,9 @@ export class EditorState {
 		}
 
 		if (changed) {
-			if (!floating.historyPushed) this.pushHistory();
+			if (!floating.historyPushed) {
+				this.pushHistoryCel(floating.layerId, floating.frame);
+			}
 			for (let y = 0; y < floating.height; y++) {
 				const destY = floating.originY + y;
 				if (destY < 0 || destY >= height) continue;
@@ -590,7 +622,7 @@ export class EditorState {
 			this.mirrorDiagonalUp = !this.mirrorDiagonalUp;
 			if (!this.mirrorDiagonalUp) this.mirrorDiagonalUpOffset = 0;
 		}
-		this.revision++;
+		// Mirror guides have their own overlay; the sprite pixels do not change.
 	}
 
 	setMirrorPosition(kind: MirrorKind, position: number): void {
@@ -608,8 +640,6 @@ export class EditorState {
 			this.mirrorDiagonalUpOffset =
 				clamp(position, 0, width + height) - (width + height) / 2;
 		}
-
-		this.revision++;
 	}
 
 	setPrimaryColor(hex: string): void {
@@ -628,6 +658,7 @@ export class EditorState {
 	}
 
 	setColorAlpha(slot: ColorSlot, alpha: number): void {
+		if (!Number.isFinite(alpha)) return;
 		const value = clamp(Math.round(alpha), 0, 255);
 		if (slot === "secondary") this.secondaryAlpha = value;
 		else this.alpha = value;
@@ -801,24 +832,142 @@ export class EditorState {
 		this.modified = true;
 	}
 
+	#entryBytes(entry: HistoryEntry): number {
+		if (entry.kind === "cels") {
+			let bytes = 0;
+			for (const patch of entry.patches) bytes += patch.pixels.byteLength;
+			return bytes;
+		}
+		return (
+			entry.doc.width *
+			entry.doc.height *
+			4 *
+			entry.doc.frames.length *
+			entry.doc.layers.length
+		);
+	}
+
+	/** Records a full document snapshot. Used for structural edits. */
 	pushHistory(): void {
 		// Any new edit implicitly applies content that is still floating.
 		if (this.floating) this.commitFloatingSelection();
-		this.#undo.push(cloneDoc(this.doc));
-		if (this.#undo.length > HISTORY_LIMIT) this.#undo.shift();
+		const entry: HistoryEntry = { kind: "full", doc: cloneDoc(this.doc) };
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
 		this.#redo = [];
+		this.#redoBytes = 0;
 		this.undoCount = this.#undo.length;
 		this.redoCount = 0;
 		this.dirty = true;
 		this.modified = true;
 	}
 
+	/**
+	 * Records only the active cel before a pixel edit. This is the hot path for
+	 * drawing, so it must not clone every layer and frame in the document.
+	 */
+	pushHistoryCel(
+		layerId: string = this.activeLayerId,
+		frame: number = this.activeFrame,
+	): void {
+		if (this.floating) this.commitFloatingSelection();
+		const layer = this.doc.layers.find((item) => item.id === layerId);
+		const cel = layer?.cels[frame];
+		if (!cel) return;
+		const entry: HistoryEntry = {
+			kind: "cels",
+			patches: [{ layerId, frame, pixels: new Uint32Array(cel) }],
+		};
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
+		this.#redo = [];
+		this.#redoBytes = 0;
+		this.undoCount = this.#undo.length;
+		this.redoCount = 0;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	/** Records several cels at once (for example, clearing a whole frame). */
+	pushHistoryCels(patches: { layerId: string; frame: number }[]): void {
+		if (this.floating) this.commitFloatingSelection();
+		const captured: CelPatch[] = [];
+		for (const patch of patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			if (!cel) continue;
+			captured.push({
+				layerId: patch.layerId,
+				frame: patch.frame,
+				pixels: new Uint32Array(cel),
+			});
+		}
+		if (captured.length === 0) return;
+		const entry: HistoryEntry = { kind: "cels", patches: captured };
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
+		this.#redo = [];
+		this.#redoBytes = 0;
+		this.undoCount = this.#undo.length;
+		this.redoCount = 0;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	#trimHistory(): void {
+		while (
+			this.#undo.length > HISTORY_LIMIT ||
+			(this.#undo.length > 1 && this.#undoBytes > HISTORY_BYTE_LIMIT)
+		) {
+			const removed = this.#undo.shift();
+			if (!removed) break;
+			this.#undoBytes -= this.#entryBytes(removed);
+		}
+		if (this.#undoBytes < 0) this.#undoBytes = 0;
+	}
+
+	/** Captures the current state of the cels an entry will overwrite. */
+	#captureHistoryEntry(entry: HistoryEntry): HistoryEntry {
+		if (entry.kind === "full") {
+			return { kind: "full", doc: cloneDoc(this.doc) };
+		}
+		const patches: CelPatch[] = [];
+		for (const patch of entry.patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			patches.push({
+				layerId: patch.layerId,
+				frame: patch.frame,
+				pixels: cel ? new Uint32Array(cel) : new Uint32Array(patch.pixels),
+			});
+		}
+		return { kind: "cels", patches };
+	}
+
+	#applyHistoryEntry(entry: HistoryEntry): void {
+		if (entry.kind === "full") {
+			this.doc = entry.doc;
+			return;
+		}
+		for (const patch of entry.patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			if (cel) cel.set(patch.pixels);
+		}
+	}
+
 	undo(): void {
 		if (this.floating) this.commitFloatingSelection();
 		const previous = this.#undo.pop();
 		if (!previous) return;
-		this.#redo.push(cloneDoc(this.doc));
-		this.doc = previous;
+		this.#undoBytes -= this.#entryBytes(previous);
+		const redoEntry = this.#captureHistoryEntry(previous);
+		this.#redo.push(redoEntry);
+		this.#redoBytes += this.#entryBytes(redoEntry);
+		this.#applyHistoryEntry(previous);
 		this.#afterHistoryRestore();
 		this.undoCount = this.#undo.length;
 		this.redoCount = this.#redo.length;
@@ -828,8 +977,12 @@ export class EditorState {
 		if (this.floating) this.commitFloatingSelection();
 		const next = this.#redo.pop();
 		if (!next) return;
-		this.#undo.push(cloneDoc(this.doc));
-		this.doc = next;
+		this.#redoBytes -= this.#entryBytes(next);
+		const undoEntry = this.#captureHistoryEntry(next);
+		this.#undo.push(undoEntry);
+		this.#undoBytes += this.#entryBytes(undoEntry);
+		this.#trimHistory();
+		this.#applyHistoryEntry(next);
 		this.#afterHistoryRestore();
 		this.undoCount = this.#undo.length;
 		this.redoCount = this.#redo.length;
@@ -845,6 +998,7 @@ export class EditorState {
 		// The selection may no longer match the restored pixels.
 		this.selection = null;
 		this.selectionRevision++;
+		this.structureRevision++;
 		this.historyActionRevision++;
 		this.revision++;
 		this.dirty = true;
@@ -871,6 +1025,8 @@ export class EditorState {
 		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
+		snapshot.undoBytes = this.#undoBytes;
+		snapshot.redoBytes = this.#redoBytes;
 	}
 
 	#activateProject(id: string): void {
@@ -894,10 +1050,13 @@ export class EditorState {
 		this.modified = tab.modified;
 		this.#undo = snapshot.undo;
 		this.#redo = snapshot.redo;
+		this.#undoBytes = snapshot.undoBytes;
+		this.#redoBytes = snapshot.redoBytes;
 		this.undoCount = snapshot.undo.length;
 		this.redoCount = snapshot.redo.length;
 		this.cursor = null;
 		this.playing = false;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -981,6 +1140,8 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 		this.projects.push({ id, name, dirty: false, modified: false });
 		this.#activateProject(id);
@@ -1007,6 +1168,8 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 		this.projects.push({ id, name, dirty: false, modified: true });
 		this.#activateProject(id);
@@ -1057,6 +1220,8 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 		this.projects.push({ id, name, dirty: true, modified: true });
 		this.#activateProject(id);
@@ -1070,14 +1235,22 @@ export class EditorState {
 
 	saveToFile(): void {
 		if (this.floating) this.commitFloatingSelection();
-		saveProjectFile(
-			this.doc,
-			this.activePalette.colors,
-			this.name,
-			this.activeFrame,
-			this.activeLayerId,
-		);
-		this.markSaved();
+		try {
+			saveProjectFile(
+				this.doc,
+				this.activePalette.colors,
+				this.name,
+				this.activeFrame,
+				this.activeLayerId,
+			);
+			this.markSaved();
+		} catch (error) {
+			window.alert(
+				error instanceof Error
+					? error.message
+					: "The project could not be saved.",
+			);
+		}
 	}
 
 	selectLayer(id: string): void {
@@ -1114,6 +1287,7 @@ export class EditorState {
 	}
 
 	setLayerOpacity(id: string, opacity: number): void {
+		if (!Number.isFinite(opacity)) return;
 		const layer = this.doc.layers.find((item) => item.id === id);
 		if (!layer) return;
 		layer.opacity = clamp(opacity, 0, 1);
@@ -1123,6 +1297,7 @@ export class EditorState {
 	}
 
 	addLayer(): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
 		this.pushHistory();
 		const layer = createLayer(
 			`Layer ${this.doc.layers.length + 1}`,
@@ -1132,10 +1307,12 @@ export class EditorState {
 		);
 		this.doc.layers.push(layer);
 		this.activeLayerId = layer.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
 	duplicateLayer(): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
 		const source = this.activeLayer;
 		if (!source) return;
 		this.pushHistory();
@@ -1150,6 +1327,7 @@ export class EditorState {
 		const index = this.doc.layers.findIndex((layer) => layer.id === source.id);
 		this.doc.layers.splice(index + 1, 0, copy);
 		this.activeLayerId = copy.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1163,6 +1341,7 @@ export class EditorState {
 		this.doc.layers.splice(index, 1);
 		this.activeLayerId =
 			this.doc.layers[Math.min(index, this.doc.layers.length - 1)]!.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1174,6 +1353,7 @@ export class EditorState {
 		this.pushHistory();
 		const [layer] = this.doc.layers.splice(index, 1);
 		this.doc.layers.splice(index + 1, 0, layer!);
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1185,6 +1365,7 @@ export class EditorState {
 		this.pushHistory();
 		const [layer] = this.doc.layers.splice(index, 1);
 		this.doc.layers.splice(index - 1, 0, layer!);
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1215,7 +1396,7 @@ export class EditorState {
 		}
 		if (!changed) return;
 
-		this.pushHistory();
+		this.pushHistoryCel(layer.id, this.activeFrame);
 		for (let i = 0; i < cel.length; i++) {
 			if (mask[i]) cel[i] = 0;
 		}
@@ -1225,18 +1406,22 @@ export class EditorState {
 	clearLayer(): void {
 		const layer = this.activeLayer;
 		if (!layer) return;
-		this.pushHistory();
+		this.pushHistoryCel(layer.id, this.activeFrame);
 		const cel = layer.cels[this.activeFrame];
 		if (cel) this.#clearCel(cel);
 		this.revision++;
 	}
 
 	clearFrame(): void {
-		this.pushHistory();
+		const frame = this.activeFrame;
+		this.pushHistoryCels(
+			this.doc.layers.map((layer) => ({ layerId: layer.id, frame })),
+		);
 		for (const layer of this.doc.layers) {
-			const cel = layer.cels[this.activeFrame];
+			const cel = layer.cels[frame];
 			if (cel) this.#clearCel(cel);
 		}
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1269,6 +1454,7 @@ export class EditorState {
 	}
 
 	addFrame(): void {
+		if (this.doc.frames.length >= MAX_PROJECT_FRAMES) return;
 		this.pushHistory();
 		const index = this.activeFrame + 1;
 		this.doc.frames.splice(index, 0, { id: uid("frame") });
@@ -1276,10 +1462,12 @@ export class EditorState {
 			layer.cels.splice(index, 0, new Uint32Array(this.doc.width * this.doc.height));
 		}
 		this.activeFrame = index;
+		this.structureRevision++;
 		this.revision++;
 	}
 
 	duplicateFrame(): void {
+		if (this.doc.frames.length >= MAX_PROJECT_FRAMES) return;
 		this.pushHistory();
 		const index = this.activeFrame;
 		this.doc.frames.splice(index + 1, 0, { id: uid("frame") });
@@ -1289,6 +1477,7 @@ export class EditorState {
 			layer.cels.splice(index + 1, 0, new Uint32Array(source));
 		}
 		this.activeFrame = index + 1;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1301,6 +1490,7 @@ export class EditorState {
 			layer.cels.splice(index, 1);
 		}
 		this.activeFrame = clamp(index, 0, this.doc.frames.length - 1);
+		this.structureRevision++;
 		this.revision++;
 	}
 

@@ -51,6 +51,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | `npm run build`   | Build for production                          |
 | `npm run preview` | Preview the production build locally         |
 | `npm run check`   | Run `svelte-check` and TypeScript validation |
+| `npm run bench`   | Run the deterministic core performance benchmarks |
 
 ## Keyboard shortcuts
 
@@ -110,6 +111,8 @@ src/
         ├── export.ts           # Image, sprite sheet, and GIF export encoding
         ├── palette.ts          # Default palette and palette persistence
         └── tools.ts            # Tool metadata and shortcuts
+bench/                          # Deterministic core benchmarks (npm run bench)
+docs/                           # Screenshot, performance notes, planned features
 ```
 
 The project tab strip lives in `components/editor/ProjectTabs.svelte`; the editor core keeps one session per project in `editor.svelte.ts`.
@@ -124,7 +127,9 @@ A document is a `PixelDoc`:
 
 Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written directly into `ImageData` for rendering and PNG export. Transparent pixels are `0`.
 
-Project files store each cel as a base64 string, so they are portable between browsers and easy to inspect.
+Project files use a compact binary container (`PXSP` version 2). Layer metadata is stored as UTF-8 JSON and each cel is stored as raw little-endian RGBA or run-length encoded data, whichever is smaller. Pixel art is usually dominated by flat color and transparency runs, so RLE keeps files small. Legacy version 1 JSON projects still open; saving upgrades them to the binary format.
+
+Undo history stores one previous cel buffer for pixel edits and a full document snapshot only for structural edits (adding, deleting, or reordering layers and frames). The stack is capped at 80 entries and about 128 MB per project.
 
 Each open project is a separate `PixelDoc` session with its own active layer/frame, zoom, pan, rotation, undo history, and dirty state. Tool, color, palette collection, theme, and timeline-height settings are shared across the workspace.
 
@@ -138,6 +143,7 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
 - Custom color palettes and the active palette selection are saved in `localStorage`; the built-in palette is recreated on load and cannot be edited.
 - Layer visibility and opacity are document-wide rather than per-frame.
-- Brushes are square and pixel-aligned; there is no selection or move tool yet.
+- Brushes are square and pixel-aligned; there is no free-transform (scale/rotate) tool for selections yet.
+- Projects are limited to 1024 layers and 1000 frames.
 - The editor does not auto-save. Use **File → Save project** to keep your work.
 - The default canvas is 32 × 32; new projects can be 1–1024 px in each dimension.
