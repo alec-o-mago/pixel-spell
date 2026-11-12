@@ -257,8 +257,6 @@
 	</div>
 
 	<div class="flex shrink-0 items-center gap-3 pr-1">
-		<Separator orientation="vertical" class="mx-1 h-5" />
-
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
