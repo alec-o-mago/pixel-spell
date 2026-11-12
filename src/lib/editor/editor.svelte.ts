@@ -1525,26 +1525,38 @@ export class EditorState {
 		if (!reference || !Number.isFinite(width)) return;
 		const nextWidth = clamp(Math.round(width), 1, 8192);
 		const ratio = reference.imageHeight / Math.max(1, reference.imageWidth);
-		reference.width = nextWidth;
-		reference.height = clamp(Math.round(nextWidth * ratio), 1, 8192);
-		this.dirty = true;
-		this.modified = true;
+		const nextHeight = clamp(Math.round(nextWidth * ratio), 1, 8192);
+		this.#resizeReferenceAroundCenter(reference, nextWidth, nextHeight);
 	}
 
 	setReferenceZoom(id: string, zoom: number): void {
 		const reference = this.doc.references.find((item) => item.id === id);
 		if (!reference || !Number.isFinite(zoom)) return;
 		const nextZoom = clamp(zoom, 0.01, 4);
-		reference.width = clamp(
+		const nextWidth = clamp(
 			Math.round(reference.imageWidth * nextZoom),
 			1,
 			16384,
 		);
-		reference.height = clamp(
+		const nextHeight = clamp(
 			Math.round(reference.imageHeight * nextZoom),
 			1,
 			16384,
 		);
+		this.#resizeReferenceAroundCenter(reference, nextWidth, nextHeight);
+	}
+
+	#resizeReferenceAroundCenter(
+		reference: ReferenceImage,
+		width: number,
+		height: number,
+	): void {
+		const centerX = reference.x + reference.width / 2;
+		const centerY = reference.y + reference.height / 2;
+		reference.width = width;
+		reference.height = height;
+		reference.x = centerX - width / 2;
+		reference.y = centerY - height / 2;
 		this.dirty = true;
 		this.modified = true;
 	}
