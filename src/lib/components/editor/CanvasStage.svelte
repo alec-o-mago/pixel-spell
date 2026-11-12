@@ -32,7 +32,7 @@
 	} from "$lib/editor/selection.js";
 	import { drawPixels, drawScaled } from "$lib/editor/render.js";
 	import { editor, type FloatingSelection } from "$lib/editor/editor.svelte.js";
-	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
+	import { isSelectionTool } from "$lib/editor/tools.js";
 	import type {
 		MirrorAxis,
 		MirrorKind,
@@ -735,18 +735,53 @@
 				editor.lockAlpha,
 			);
 
+		const pixelPerfect = editor.pixelPerfectFor(editor.tool);
+
 		if (editor.tool === "line") {
-			plotLine(start.x, start.y, end.x, end.y, stroke);
+			if (pixelPerfect) {
+				const path: Point[] = [];
+				plotLine(start.x, start.y, end.x, end.y, (x, y) => path.push({ x, y }));
+				for (const point of filterPixelPerfectPath(path)) {
+					stroke(point.x, point.y);
+				}
+			} else {
+				plotLine(start.x, start.y, end.x, end.y, stroke);
+			}
 		} else if (editor.tool === "shape") {
-			plotShape(
-				editor.shapeKind,
-				start.x,
-				start.y,
-				end.x,
-				end.y,
-				editor.shapeFilled,
-				editor.shapeFilled ? dot : stroke,
+			const minSide = Math.min(
+				Math.abs(end.x - start.x),
+				Math.abs(end.y - start.y),
 			);
+			if (
+				pixelPerfect &&
+				!editor.shapeFilled &&
+				editor.shapeKind !== "rectangle" &&
+				minSide >= 4
+			) {
+				const path: Point[] = [];
+				plotShape(
+					editor.shapeKind,
+					start.x,
+					start.y,
+					end.x,
+					end.y,
+					false,
+					(x, y) => path.push({ x, y }),
+				);
+				for (const point of filterPixelPerfectPointSet(path)) {
+					stroke(point.x, point.y);
+				}
+			} else {
+				plotShape(
+					editor.shapeKind,
+					start.x,
+					start.y,
+					end.x,
+					end.y,
+					editor.shapeFilled,
+					editor.shapeFilled ? dot : stroke,
+				);
+			}
 		}
 	}
 
@@ -814,7 +849,7 @@
 		);
 
 		const path =
-			editor.pixelPerfect && usesPixelPerfect("curve")
+			editor.pixelPerfectFor("curve")
 				? filterPixelPerfectPath(rawPath)
 				: rawPath;
 		for (const point of path) stroke(point.x, point.y);
@@ -886,6 +921,69 @@
 		const path: Point[] = [];
 		for (const point of points) appendPixelPerfectPointTo(path, point.x, point.y);
 		return path;
+	}
+
+	/**
+	 * Removes redundant elbow pixels from a rasterized outline. Pixels that are
+	 * part of a solid 2x2 block are kept so tiny shapes do not erode away.
+	 */
+	function filterPixelPerfectPointSet(points: readonly Point[]): Point[] {
+		const pixels = new Map<string, Point>();
+		for (const point of points) pixels.set(`${point.x},${point.y}`, point);
+
+		const offsets = [
+			[1, 0],
+			[-1, 0],
+			[0, 1],
+			[0, -1],
+		] as const;
+		const blocks = [
+			[0, 0],
+			[-1, 0],
+			[0, -1],
+			[-1, -1],
+		] as const;
+
+		while (true) {
+			const removals: string[] = [];
+
+			for (const [key, point] of pixels) {
+				let inBlock = false;
+				for (const [offsetX, offsetY] of blocks) {
+					const x = point.x + offsetX;
+					const y = point.y + offsetY;
+					if (
+						pixels.has(`${x},${y}`) &&
+						pixels.has(`${x + 1},${y}`) &&
+						pixels.has(`${x},${y + 1}`) &&
+						pixels.has(`${x + 1},${y + 1}`)
+					) {
+						inBlock = true;
+						break;
+					}
+				}
+				if (inBlock) continue;
+
+				const present: { x: number; y: number }[] = [];
+				for (const [offsetX, offsetY] of offsets) {
+					if (pixels.has(`${point.x + offsetX},${point.y + offsetY}`)) {
+						present.push({ x: offsetX, y: offsetY });
+					}
+				}
+				if (present.length !== 2) continue;
+
+				const first = present[0]!;
+				const second = present[1]!;
+				if (Math.abs(first.x - second.x) === 1 && Math.abs(first.y - second.y) === 1) {
+					removals.push(key);
+				}
+			}
+
+			if (removals.length === 0) break;
+			for (const key of removals) pixels.delete(key);
+		}
+
+		return [...pixels.values()];
 	}
 
 	function repaintPixelPerfectStroke(cel: Uint32Array): void {
@@ -1682,7 +1780,7 @@
 		drawing = true;
 		start = point;
 		last = point;
-		strokePixelPerfect = editor.pixelPerfect && usesPixelPerfect(tool);
+		strokePixelPerfect = editor.pixelPerfectFor(tool);
 		strokePath = strokePixelPerfect ? [point] : [];
 
 		if (tool === "spray") {

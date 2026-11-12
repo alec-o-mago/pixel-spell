@@ -5,7 +5,7 @@
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
-	import { TOOL_BY_ID } from "$lib/editor/tools.js";
+	import { TOOL_BY_ID, usesPixelPerfect } from "$lib/editor/tools.js";
 	import type { GradientDither } from "$lib/editor/types.js";
 	import ShapePicker from "./ShapePicker.svelte";
 	import ToolIcon from "./ToolIcon.svelte";
@@ -25,6 +25,9 @@
 			editor.tool === "line" ||
 			editor.tool === "curve" ||
 			(isShape && !editor.shapeFilled),
+	);
+	let showPixelPerfect = $derived(
+		usesPixelPerfect(editor.tool) && !(isShape && editor.shapeFilled),
 	);
 </script>
 
@@ -335,6 +338,24 @@
 							</span>
 						</span>
 						<Switch bind:checked={editor.shapeFilled} />
+					</label>
+				{/if}
+
+				{#if showPixelPerfect}
+					<label
+						class="flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5"
+					>
+						<span class="grid gap-0.5">
+							<span class="text-xs font-medium">Pixel perfect</span>
+							<span class="text-[10px] leading-snug text-muted-foreground">
+								Remove extra corner pixels from stair-stepped edges.
+							</span>
+						</span>
+						<Switch
+							checked={editor.pixelPerfectFor(editor.tool)}
+							onCheckedChange={(checked) =>
+								editor.setPixelPerfect(editor.tool, checked)}
+						/>
 					</label>
 				{/if}
 

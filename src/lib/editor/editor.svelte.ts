@@ -13,6 +13,7 @@ import {
 	fitPixelsToCanvas,
 } from "./reference.js";
 import { selectionBounds } from "./selection.js";
+import { usesPixelPerfect } from "./tools.js";
 import {
 	DEFAULT_PALETTE_ID,
 	MAX_PALETTE_COLORS,
@@ -159,7 +160,8 @@ export class EditorState {
 	radialCenterX = $state(0);
 	radialCenterY = $state(0);
 	lockAlpha = $state(false);
-	pixelPerfect = $state(false);
+	/** Per-tool pixel-perfect preference; absent means off. */
+	pixelPerfectByTool = $state<Partial<Record<ToolId, boolean>>>({});
 	shapeFilled = $state(false);
 	/** Shape drawn by the combined shape tool. */
 	shapeKind = $state<ShapeKind>("rectangle");
@@ -395,6 +397,16 @@ export class EditorState {
 
 	setTool(tool: ToolId): void {
 		this.tool = tool;
+	}
+
+	/** Whether the tool has a pixel-perfect option and it is enabled. */
+	pixelPerfectFor(tool: ToolId): boolean {
+		return usesPixelPerfect(tool) && !!this.pixelPerfectByTool[tool];
+	}
+
+	setPixelPerfect(tool: ToolId, enabled: boolean): void {
+		if (!usesPixelPerfect(tool)) return;
+		this.pixelPerfectByTool[tool] = enabled;
 	}
 
 	setSelection(mask: Uint8Array | null, keepFloating = false): void {

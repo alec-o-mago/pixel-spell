@@ -14,7 +14,6 @@
 	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
-	import LineSquiggle from "@lucide/svelte/icons/line-squiggle";
 	import Lock from "@lucide/svelte/icons/lock";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
 	import Moon from "@lucide/svelte/icons/moon";
@@ -258,27 +257,6 @@
 	</div>
 
 	<div class="flex shrink-0 items-center gap-3 pr-1">
-		<Tooltip.Root>
-			<Tooltip.Trigger>
-				{#snippet child({ props })}
-					<Button
-						{...props}
-						variant="ghost"
-						size="icon-sm"
-						class={`text-muted-foreground ${activeRing(editor.pixelPerfect)}`}
-						onclick={() => (editor.pixelPerfect = !editor.pixelPerfect)}
-						aria-label="Toggle pixel perfect"
-						aria-pressed={editor.pixelPerfect}
-					>
-						<LineSquiggle class="size-4" />
-					</Button>
-				{/snippet}
-			</Tooltip.Trigger>
-			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
-				Pixel perfect — remove extra corner pixels
-			</Tooltip.Content>
-		</Tooltip.Root>
-
 		<Separator orientation="vertical" class="mx-1 h-5" />
 
 		<Tooltip.Root>
