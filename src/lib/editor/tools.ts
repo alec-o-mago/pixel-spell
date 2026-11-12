@@ -144,7 +144,6 @@ export function isSelectionTool(tool: ToolId): boolean {
 const PIXEL_PERFECT_TOOLS = new Set<ToolId>([
 	"pencil",
 	"eraser",
-	"line",
 	"curve",
 	"shape",
 ]);

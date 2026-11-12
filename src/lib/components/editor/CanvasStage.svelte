@@ -738,15 +738,7 @@
 		const pixelPerfect = editor.pixelPerfectFor(editor.tool);
 
 		if (editor.tool === "line") {
-			if (pixelPerfect) {
-				const path: Point[] = [];
-				plotLine(start.x, start.y, end.x, end.y, (x, y) => path.push({ x, y }));
-				for (const point of filterPixelPerfectPath(path)) {
-					stroke(point.x, point.y);
-				}
-			} else {
-				plotLine(start.x, start.y, end.x, end.y, stroke);
-			}
+			plotLine(start.x, start.y, end.x, end.y, stroke);
 		} else if (editor.tool === "shape") {
 			const minSide = Math.min(
 				Math.abs(end.x - start.x),
