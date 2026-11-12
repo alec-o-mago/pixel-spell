@@ -1415,30 +1415,36 @@
 		context.translate(centerX, centerY);
 		context.rotate((editor.rotation * Math.PI) / 180);
 		context.translate(-canvasWidth / 2, -canvasHeight / 2);
-		context.beginPath();
 
-		for (const axis of axes) {
-			const offset = axis.position * scale;
-			if (axis.kind === "x") {
-				context.moveTo(-span, offset);
-				context.lineTo(span, offset);
-			} else if (axis.kind === "y") {
-				context.moveTo(offset, -span);
-				context.lineTo(offset, span);
-			} else if (axis.kind === "diagonal-down") {
-				context.moveTo(-span, -span + offset);
-				context.lineTo(span, span + offset);
-			} else {
-				context.moveTo(-span, span + offset);
-				context.lineTo(span, -span + offset);
+		context.lineWidth = 1.5;
+		context.setLineDash([6, 4]);
+
+		if (axes.length > 0) {
+			context.beginPath();
+			for (const axis of axes) {
+				const offset = axis.position * scale;
+				if (axis.kind === "x") {
+					context.moveTo(-span, offset);
+					context.lineTo(span, offset);
+				} else if (axis.kind === "y") {
+					context.moveTo(offset, -span);
+					context.lineTo(offset, span);
+				} else if (axis.kind === "diagonal-down") {
+					context.moveTo(-span, -span + offset);
+					context.lineTo(span, span + offset);
+				} else {
+					context.moveTo(-span, span + offset);
+					context.lineTo(span, -span + offset);
+				}
 			}
+			context.strokeStyle = "rgba(14, 165, 233, 0.95)";
+			context.stroke();
 		}
 
-		let radialX = 0;
-		let radialY = 0;
 		if (radial) {
-			radialX = radial.centerX * scale;
-			radialY = radial.centerY * scale;
+			const radialX = radial.centerX * scale;
+			const radialY = radial.centerY * scale;
+			context.beginPath();
 			// A line through the center covers both opposite spokes, so even
 			// counts only need half as many drawn lines.
 			const lineCount = radial.count % 2 === 0 ? radial.count / 2 : radial.count;
@@ -1449,24 +1455,20 @@
 				context.moveTo(radialX - dx, radialY - dy);
 				context.lineTo(radialX + dx, radialY + dy);
 			}
-		}
+			context.strokeStyle = "rgba(239, 68, 68, 0.95)";
+			context.stroke();
 
-		context.lineWidth = 1.5;
-		context.setLineDash([6, 4]);
-		context.strokeStyle = "rgba(14, 165, 233, 0.95)";
-		context.stroke();
-		context.setLineDash([]);
-
-		if (radial) {
+			context.setLineDash([]);
 			context.beginPath();
 			context.arc(radialX, radialY, 4, 0, Math.PI * 2);
-			context.fillStyle = "rgba(14, 165, 233, 0.95)";
+			context.fillStyle = "rgba(239, 68, 68, 0.95)";
 			context.strokeStyle = "rgba(255, 255, 255, 0.95)";
 			context.lineWidth = 2;
 			context.fill();
 			context.stroke();
 		}
 
+		context.setLineDash([]);
 		mirrorCanvasHasContent = true;
 	}
 

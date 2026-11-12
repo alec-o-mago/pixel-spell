@@ -688,24 +688,16 @@ export class EditorState {
 			this.mirrorDiagonalUp = !this.mirrorDiagonalUp;
 			if (!this.mirrorDiagonalUp) this.mirrorDiagonalUpOffset = 0;
 		}
-
-		// Radial and axis mirrors are mutually exclusive.
-		if (
-			this.mirrorX ||
-			this.mirrorY ||
-			this.mirrorDiagonalDown ||
-			this.mirrorDiagonalUp
-		) {
-			this.radialEnabled = false;
-		}
 		// Mirror guides have their own overlay; the sprite pixels do not change.
 	}
 
 	toggleRadial(): void {
 		this.radialEnabled = !this.radialEnabled;
-		if (!this.radialEnabled) return;
-		// Enabling radial symmetry clears every axis mirror.
-		this.#disableMirrors();
+		if (!this.radialEnabled) {
+			// A disabled radial guide always restarts at the canvas center.
+			this.radialCenterX = 0;
+			this.radialCenterY = 0;
+		}
 	}
 
 	setRadialCount(count: number): void {
@@ -721,17 +713,6 @@ export class EditorState {
 		if (!Number.isFinite(x) || !Number.isFinite(y)) return;
 		this.radialCenterX = clamp(x, 0, this.doc.width) - this.doc.width / 2;
 		this.radialCenterY = clamp(y, 0, this.doc.height) - this.doc.height / 2;
-	}
-
-	#disableMirrors(): void {
-		this.mirrorX = false;
-		this.mirrorY = false;
-		this.mirrorDiagonalDown = false;
-		this.mirrorDiagonalUp = false;
-		this.mirrorXOffset = 0;
-		this.mirrorYOffset = 0;
-		this.mirrorDiagonalDownOffset = 0;
-		this.mirrorDiagonalUpOffset = 0;
 	}
 
 	setMirrorPosition(kind: MirrorKind, position: number): void {
