@@ -8,7 +8,12 @@
  * exact TypeScript sources used by the app are measured.
  */
 import { packColor } from "../src/lib/editor/color.js";
-import { cloneDoc, compositeFrame, createDoc } from "../src/lib/editor/doc.js";
+import {
+	cloneDoc,
+	compositeFrame,
+	createDoc,
+	createLayer,
+} from "../src/lib/editor/doc.js";
 import {
 	blurPixels,
 	fillPixels,
@@ -130,6 +135,26 @@ measure("compositeFrame 128x128x6 (per frame)", 20, 5, () => {
 measure("cloneDoc 512x512x4x6", 8, 2, () => {
 	cloneDoc(compositeDoc);
 });
+
+// Reference layers must be opt-in for viewport compositing and excluded by default.
+{
+	const referenceDoc = createDoc(2, 1);
+	referenceDoc.layers[0]!.cels[0]!.fill(packColor("#ff0000"));
+	const reference = createLayer("Reference", 2, 1, 1, "reference");
+	reference.cels[0]!.fill(packColor("#0000ff"));
+	referenceDoc.layers.push(reference);
+
+	const exported = compositeFrame(referenceDoc, 0);
+	const viewport = compositeFrame(referenceDoc, 0, true);
+	if (exported[0] !== packColor("#ff0000")) {
+		throw new Error("reference layer leaked into the default composite");
+	}
+	if (viewport[0] !== packColor("#0000ff")) {
+		throw new Error("reference layer missing from the viewport composite");
+	}
+}
+
+
 
 // --- Drawing --------------------------------------------------------------
 const width = 512;
@@ -258,10 +283,21 @@ function assertProjectRoundtrip(doc: PixelDoc, label: string): void {
 	if (parsed.doc.layers.length !== doc.layers.length) {
 		throw new Error(`${label}: layer count changed`);
 	}
+	if (parsed.doc.references.length !== doc.references.length) {
+		throw new Error(`${label}: reference count changed`);
+	}
 	for (let layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) {
+		const originalLayer = doc.layers[layerIndex]!;
+		const restoredLayer = parsed.doc.layers[layerIndex]!;
+		if (originalLayer.role !== restoredLayer.role) {
+			throw new Error(`${label}: layer role changed`);
+		}
+		if (originalLayer.locked !== restoredLayer.locked) {
+			throw new Error(`${label}: layer lock changed`);
+		}
 		for (let frame = 0; frame < doc.frames.length; frame++) {
-			const original = doc.layers[layerIndex]!.cels[frame]!;
-			const restored = parsed.doc.layers[layerIndex]!.cels[frame]!;
+			const original = originalLayer.cels[frame]!;
+			const restored = restoredLayer.cels[frame]!;
 			if (original.length !== restored.length) {
 				throw new Error(`${label}: cel length changed`);
 			}
@@ -272,12 +308,57 @@ function assertProjectRoundtrip(doc: PixelDoc, label: string): void {
 			}
 		}
 	}
+	for (let index = 0; index < doc.references.length; index++) {
+		const original = doc.references[index]!;
+		const restored = parsed.doc.references[index]!;
+		if (original.id !== restored.id || original.name !== restored.name) {
+			throw new Error(`${label}: reference identity changed`);
+		}
+		if (original.bytes.length !== restored.bytes.length) {
+			throw new Error(`${label}: reference byte length changed`);
+		}
+		for (let byte = 0; byte < original.bytes.length; byte++) {
+			if (original.bytes[byte] !== restored.bytes[byte]) {
+				throw new Error(`${label}: reference bytes changed`);
+			}
+		}
+		if (
+			original.x !== restored.x ||
+			original.y !== restored.y ||
+			original.width !== restored.width ||
+			original.height !== restored.height ||
+			original.opacity !== restored.opacity
+		) {
+			throw new Error(`${label}: reference transform changed`);
+		}
+	}
 }
 
 assertProjectRoundtrip(makeDoc(64, 64, 2, 3, 41), "sparse");
 const opaqueDoc = makeDoc(64, 64, 1, 1, 42);
 for (const cel of opaqueDoc.layers[0]!.cels) cel.fill(0xff336699);
 assertProjectRoundtrip(opaqueDoc, "flat");
+
+const referenceDoc = makeDoc(64, 64, 2, 3, 43);
+referenceDoc.layers[0]!.role = "reference";
+referenceDoc.layers[0]!.locked = true;
+referenceDoc.references.push({
+	id: "reference-1",
+	name: "Mood board",
+	bytes: new Uint8Array([137, 80, 78, 71, 1, 2, 3, 4, 5, 6, 7, 8]),
+	mime: "image/png",
+	imageWidth: 1024,
+	imageHeight: 768,
+	x: -80,
+	y: 24,
+	width: 128,
+	height: 96,
+	rotation: 0,
+	opacity: 0.75,
+	visible: true,
+	locked: false,
+});
+assertProjectRoundtrip(referenceDoc, "reference board");
 
 // --- GIF export -----------------------------------------------------------
 const gifDoc = makeDoc(128, 128, 3, 12, 31);

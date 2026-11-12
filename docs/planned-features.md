@@ -12,7 +12,7 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 
 | # | Feature | Appeal | Difficulty | Score | Strategic | Why / implementation notes |
 | ---: | --- | ---: | ---: | ---: | :---: | --- |
-| 1 | Reference image / tracing layer | 9 | 2 | 4.50 | | Import an image as a locked, non-exported layer with opacity and tint. Reuse the import pipeline, add `Layer.exportable`/`role`, and skip it in export/composite-for-export. Huge workflow win for tracing and matching a reference. |
+| 1 | Reference image / tracing layer ✓ | 9 | 2 | 4.50 | | Implemented as two complementary features: **Reference Layer** (timeline-integrated, per-frame cels, locked, non-exported, fitted to canvas) and **Reference Board** (project-level images independent of layers/frames, movable outside the canvas, non-exported). The import dialog also supports Layer and Frames destinations. |
 | 2 | Radial / N-fold symmetry | 7 | 2 | 3.50 | | The mirror system already transforms points in `forEachMirroredPoint`. Add rotational copies around a draggable center and a symmetry count (2–16). Low risk, immediately useful for mandalas, wheels, and ornaments. |
 | 3 | Pixel-perfect line/shape/curve modes | 7 | 2 | 3.50 | | Reuse the existing pixel-perfect path filter for line, curve, and shape outlines. Add an option per tool. Removes the “stair-step plus corner” look without changing the data model. |
 | 4 | Autosave and crash recovery | 9 | 3 | 3.00 | | Persist project snapshots to IndexedDB every N seconds/edits and offer recovery on load. Project tabs are currently in-memory; this closes the biggest data-loss gap. Add “restore autosave” and “discard” choices. |
@@ -64,7 +64,7 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 
 ### Phase 1 — high-value quick wins (days to ~2 weeks)
 
-1. Reference image / tracing layer
+1. Reference image / tracing layer — done (Reference Layer + Reference Board)
 2. Onion skinning
 3. Autosave and crash recovery
 4. Frame tags, per-frame durations, and loop range

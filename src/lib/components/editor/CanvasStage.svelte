@@ -33,9 +33,16 @@
 	import { drawPixels, drawScaled } from "$lib/editor/render.js";
 	import { editor, type FloatingSelection } from "$lib/editor/editor.svelte.js";
 	import { isSelectionTool, usesPixelPerfect } from "$lib/editor/tools.js";
-	import type { MirrorAxis, MirrorKind, Point } from "$lib/editor/types.js";
+	import type {
+		MirrorAxis,
+		MirrorKind,
+		Point,
+		ReferenceImage,
+	} from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 	import Preview from "./Preview.svelte";
+	import ReferenceBoardImage from "./ReferenceBoardImage.svelte";
+	import ReferenceBoardPanel from "./ReferenceBoardPanel.svelte";
 
 	const ROTATION_OPTIONS = Array.from({ length: 25 }, (_, index) => -180 + index * 15);
 	const GRID_SIZES = [1, 2, 4, 8, 16, 32, 64];
@@ -121,14 +128,20 @@
 	let hoveringSelection = $state(false);
 	let hoveringMirror = $state<MirrorKind | null>(null);
 	let draggingMirror = $state<MirrorKind | null>(null);
+	let hoveringReference = $state(false);
+	let draggingReference = $state<{
+		id: string;
+		startX: number;
+		startY: number;
+		originX: number;
+		originY: number;
+	} | null>(null);
 
 	let zoom = $derived(editor.effectiveZoom);
 	let canvasWidth = $derived(editor.doc.width * zoom);
 	let canvasHeight = $derived(editor.doc.height * zoom);
 	let gridStep = $derived(zoom * editor.gridSize);
-	let isDrawable = $derived(
-		!!editor.activeLayer && !editor.activeLayer.locked && editor.activeLayer.visible,
-	);
+	let isDrawable = $derived(editor.activeLayerDrawable);
 
 	let brushCursorSize = $derived(
 		editor.tool === "pencil" ||
@@ -155,45 +168,55 @@
 		!panning &&
 			!draggingMirror &&
 			!hoveringMirror &&
+			!draggingReference &&
+			!hoveringReference &&
 			editor.tool !== "pan" &&
 			editor.tool !== "zoom" &&
 			!isSelectionTool(editor.tool),
 	);
 
 	let canvasCursor = $derived(
-		draggingMirror
-			? mirrorCursor(draggingMirror)
-			: hoveringMirror
-				? mirrorCursor(hoveringMirror)
-				: panning
-					? "cursor-grabbing"
-					: editor.tool === "pan"
-						? "cursor-grab"
-						: editor.tool === "zoom"
-							? "cursor-zoom-in"
-							: isSelectionTool(editor.tool)
-								? hoveringSelection
-									? "cursor-move"
-									: "cursor-crosshair"
-								: editor.tool === "eyedropper"
-									? "cursor-copy"
-									: !isDrawable
-										? "cursor-not-allowed"
-										: editor.tool === "fill"
-											? "cursor-cell"
-											: "cursor-crosshair",
+		draggingReference
+			? "cursor-grabbing"
+			: hoveringReference
+				? "cursor-move"
+				: draggingMirror
+					? mirrorCursor(draggingMirror)
+					: hoveringMirror
+						? mirrorCursor(hoveringMirror)
+						: panning
+							? "cursor-grabbing"
+							: editor.tool === "pan"
+								? "cursor-grab"
+								: editor.tool === "zoom"
+									? "cursor-zoom-in"
+									: isSelectionTool(editor.tool)
+										? hoveringSelection
+											? "cursor-move"
+											: "cursor-crosshair"
+										: editor.tool === "eyedropper"
+											? "cursor-copy"
+											: !isDrawable
+												? "cursor-not-allowed"
+												: editor.tool === "fill"
+													? "cursor-cell"
+													: "cursor-crosshair",
 	);
 
 	let stageCursor = $derived(
-		draggingMirror
-			? mirrorCursor(draggingMirror)
-			: hoveringMirror
-				? mirrorCursor(hoveringMirror)
-				: panning
-					? "cursor-grabbing"
-					: editor.tool === "pan"
-						? "cursor-grab"
-						: "",
+		draggingReference
+			? "cursor-grabbing"
+			: hoveringReference
+				? "cursor-move"
+				: draggingMirror
+					? mirrorCursor(draggingMirror)
+					: hoveringMirror
+						? mirrorCursor(hoveringMirror)
+						: panning
+							? "cursor-grabbing"
+							: editor.tool === "pan"
+								? "cursor-grab"
+								: "",
 	);
 
 	$effect(() => {
@@ -225,7 +248,7 @@
 		// Coalesce rapid pointer moves into one draw per animation frame.
 		const id = requestAnimationFrame(() => {
 			if (!canvas) return;
-			const pixels = compositeFrameCached(doc, frame, revision);
+			const pixels = compositeFrameCached(doc, frame, revision, true);
 			drawScaled(
 				canvas,
 				pixels,
@@ -309,6 +332,8 @@
 		stopSpray();
 		resetLasso();
 		resetCurveState(false);
+		draggingReference = null;
+		hoveringReference = false;
 		selecting = false;
 	});
 
@@ -366,6 +391,73 @@
 			x: Math.min(editor.doc.width - 1, Math.floor(relativeX * editor.doc.width)),
 			y: Math.min(editor.doc.height - 1, Math.floor(relativeY * editor.doc.height)),
 		};
+	}
+
+	/** Maps a pointer event to document coordinates, including outside the canvas. */
+	function documentPointFromEvent(event: {
+		clientX: number;
+		clientY: number;
+	}): Point | null {
+		const local = pointerToLocalCanvas(event);
+		const scale = editor.effectiveZoom;
+		if (!local || scale <= 0) return null;
+		return { x: local.x / scale, y: local.y / scale };
+	}
+
+	/** Board references are draggable only while selected and unlocked. */
+	function referenceAtEvent(event: PointerEvent): ReferenceImage | null {
+		if (!editor.showReferenceBoard) return null;
+		const reference = editor.activeReference;
+		if (!reference || reference.locked || !reference.visible) return null;
+		const point = documentPointFromEvent(event);
+		if (!point) return null;
+		if (
+			point.x < reference.x ||
+			point.y < reference.y ||
+			point.x > reference.x + reference.width ||
+			point.y > reference.y + reference.height
+		) {
+			return null;
+		}
+		return reference;
+	}
+
+	function beginReferenceDrag(
+		event: PointerEvent,
+		reference: ReferenceImage,
+		target: HTMLElement | undefined,
+	): void {
+		const point = documentPointFromEvent(event);
+		if (!point) return;
+		event.preventDefault();
+		editor.selectReferenceImage(reference.id);
+		draggingReference = {
+			id: reference.id,
+			startX: point.x,
+			startY: point.y,
+			originX: reference.x,
+			originY: reference.y,
+		};
+		hoveringReference = true;
+		capturePointer(event, target);
+	}
+
+	function updateReferenceDrag(event: PointerEvent): void {
+		if (!draggingReference) return;
+		const point = documentPointFromEvent(event);
+		if (!point) return;
+		editor.moveReferenceImage(
+			draggingReference.id,
+			Math.round(draggingReference.originX + point.x - draggingReference.startX),
+			Math.round(draggingReference.originY + point.y - draggingReference.startY),
+		);
+	}
+
+	function finishReferenceDrag(event: PointerEvent, target: HTMLElement | undefined): void {
+		if (!draggingReference) return;
+		draggingReference = null;
+		hoveringReference = referenceAtEvent(event) !== null;
+		releasePointer(event, target);
 	}
 
 	function isEditable(): boolean {
@@ -1306,6 +1398,7 @@
 		if (event.button === 1) {
 			event.preventDefault();
 			hoveringMirror = null;
+			hoveringReference = false;
 			if (!drawing && !movingSelection && !selecting && !lassoDragging) {
 				startPan(event);
 			}
@@ -1313,6 +1406,12 @@
 		}
 
 		if (event.button === 0) {
+			const reference = referenceAtEvent(event);
+			if (reference) {
+				beginReferenceDrag(event, reference, canvas);
+				return;
+			}
+
 			const mirror = mirrorAtEvent(event);
 			if (mirror) {
 				event.preventDefault();
@@ -1508,12 +1607,18 @@
 	}
 
 	function handlePointerMove(event: PointerEvent): void {
+		if (draggingReference) {
+			updateReferenceDrag(event);
+			return;
+		}
+
 		if (draggingMirror) {
 			updateMirrorDrag(event);
 			return;
 		}
 
 		if (!panning && !movingSelection && !selecting && !lassoDragging && !drawing) {
+			hoveringReference = referenceAtEvent(event) !== null;
 			hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
 		}
 
@@ -1628,6 +1733,11 @@
 	}
 
 	function handlePointerUp(event: PointerEvent): void {
+		if (draggingReference) {
+			finishReferenceDrag(event, canvas);
+			return;
+		}
+
 		if (draggingMirror) {
 			draggingMirror = null;
 			releasePointer(event);
@@ -1707,12 +1817,19 @@
 		setCursor(null);
 		hoveringSelection = false;
 		hoveringMirror = null;
+		hoveringReference = false;
 		if (editor.tool === "lasso") lassoHover = null;
 	}
 
 	function handleStagePointerDown(event: PointerEvent): void {
 		if (event.button !== 0 || event.target === canvas) return;
 		blurActiveInput();
+
+		const reference = referenceAtEvent(event);
+		if (reference) {
+			beginReferenceDrag(event, reference, stage);
+			return;
+		}
 
 		const mirror = mirrorAtEvent(event);
 		if (mirror) {
@@ -1728,23 +1845,35 @@
 	function handleStagePointerMove(event: PointerEvent): void {
 		if (event.target === canvas) return;
 
+		if (draggingReference) {
+			updateReferenceDrag(event);
+			return;
+		}
+
 		if (draggingMirror) {
 			updateMirrorDrag(event);
 			return;
 		}
 
 		if (panning || movingSelection || selecting || lassoDragging || drawing) return;
+		hoveringReference = referenceAtEvent(event) !== null;
 		hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
 	}
 
 	function handleStagePointerUp(event: PointerEvent): void {
-		if (event.target === canvas || !draggingMirror) return;
+		if (event.target === canvas) return;
+		if (draggingReference) {
+			finishReferenceDrag(event, stage);
+			return;
+		}
+		if (!draggingMirror) return;
 		draggingMirror = null;
 		releasePointer(event, stage);
 	}
 
 	function handleStagePointerLeave(): void {
-		if (draggingMirror) return;
+		if (draggingReference || draggingMirror) return;
+		hoveringReference = false;
 		hoveringMirror = null;
 	}
 
@@ -1772,6 +1901,16 @@
 			style:transform={`translate(calc(-50% + ${editor.panX}px), calc(-50% + ${editor.panY}px)) rotate(${editor.rotation}deg)`}
 		>
 			<div class="checkerboard checkerboard-lg absolute inset-0"></div>
+
+			{#each editor.doc.references as reference (reference.id)}
+				{#if reference.visible}
+					<ReferenceBoardImage
+						{reference}
+						{zoom}
+						active={reference.id === editor.activeReferenceId}
+					/>
+				{/if}
+			{/each}
 
 			<canvas
 				bind:this={canvas}
@@ -1834,6 +1973,7 @@
 	</div>
 
 	<Preview />
+	<ReferenceBoardPanel />
 
 	<div
 		class="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-full border bg-background/90 p-1 shadow-sm backdrop-blur"

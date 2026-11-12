@@ -6,6 +6,7 @@
 	import Pause from "@lucide/svelte/icons/pause";
 	import Play from "@lucide/svelte/icons/play";
 	import Plus from "@lucide/svelte/icons/plus";
+	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import SkipBack from "@lucide/svelte/icons/skip-back";
 	import SkipForward from "@lucide/svelte/icons/skip-forward";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -15,10 +16,50 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
+	import {
+		IMAGE_IMPORT_ACCEPT,
+		analyzeImportFile,
+	} from "$lib/editor/import.js";
 	import { cn } from "$lib/utils.js";
 	import TimelineLayerRow from "./TimelineLayerRow.svelte";
 
 	let opacity = $state(100);
+	let referenceInput = $state<HTMLInputElement>();
+	let referenceLoading = $state(false);
+
+	async function addReferenceLayer(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = "";
+		if (!file) return;
+
+		referenceLoading = true;
+		try {
+			const result = await analyzeImportFile(file);
+			if (result.reference) {
+				const image = {
+					name: result.reference.name,
+					width: result.reference.pixelWidth,
+					height: result.reference.pixelHeight,
+					pixels: result.reference.pixels,
+				};
+				// Replacing the current cel makes it easy to build a per-frame
+				// reference sequence without creating a layer per image.
+				if (!editor.setReferenceLayerImage(image)) {
+					editor.importReferenceLayer(image, { allFrames: true });
+				}
+			} else {
+				window.alert(
+					result.error ?? "This file can't be used as a reference layer.",
+				);
+			}
+			if (result.project) URL.revokeObjectURL(result.project.previewUrl);
+		} catch {
+			window.alert("This image could not be read.");
+		} finally {
+			referenceLoading = false;
+		}
+	}
 
 	$effect(() => {
 		opacity = Math.round(editor.activeLayer.opacity * 100);
@@ -53,6 +94,16 @@
 		>
 			{editor.doc.layers.length} × {editor.frameCount}
 		</Badge>
+		{#if editor.referenceLayerCount > 0}
+			<Badge
+				variant="outline"
+				class="h-5 gap-1 px-1.5 text-[10px] text-muted-foreground"
+				title={`${editor.referenceLayerCount} reference layers`}
+			>
+				<ScanEye class="size-3" />
+				{editor.referenceLayerCount}
+			</Badge>
+		{/if}
 
 		<Separator orientation="vertical" class="mx-1.5 h-5" />
 		<Button
@@ -64,6 +115,17 @@
 			aria-label="Add layer"
 		>
 			<Plus class="size-3.5" />
+		</Button>
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			class="text-muted-foreground"
+			onclick={() => referenceInput?.click()}
+			disabled={referenceLoading}
+			title="Add or replace reference layer from image"
+			aria-label="Add or replace reference layer from image"
+		>
+			<ScanEye class="size-3.5" />
 		</Button>
 		<Button
 			variant="ghost"
@@ -190,6 +252,14 @@
 			</div>
 		</div>
 	</header>
+
+	<input
+		bind:this={referenceInput}
+		type="file"
+		accept={IMAGE_IMPORT_ACCEPT}
+		class="hidden"
+		onchange={addReferenceLayer}
+	/>
 
 	<div class="min-h-0 flex-1 overflow-auto">
 		<table class="w-full border-separate border-spacing-0">

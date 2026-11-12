@@ -1,6 +1,11 @@
 import { normalizeHex } from "./color.js";
 import { uid } from "./doc.js";
-import type { Layer, PixelDoc } from "./types.js";
+import {
+	MAX_REFERENCE_BYTES,
+	MAX_REFERENCE_COUNT,
+	MAX_TOTAL_REFERENCE_BYTES,
+} from "./reference.js";
+import type { Layer, PixelDoc, ReferenceImage } from "./types.js";
 
 export interface LoadedProject {
 	doc: PixelDoc;
@@ -11,7 +16,8 @@ export interface LoadedProject {
 }
 
 const MAGIC = [0x50, 0x58, 0x53, 0x50]; // "PXSP"
-const FORMAT_VERSION = 1;
+/** Only the current format is accepted; this app has no released legacy files. */
+const FORMAT_VERSION = 2;
 const METHOD_RAW = 0;
 const METHOD_RLE = 1;
 const HEADER_SIZE = 4 + 1 + 1 + 2 + 2 + 1 + 2 + 2 + 4;
@@ -33,7 +39,25 @@ interface ProjectMeta {
 		visible: boolean;
 		locked: boolean;
 		opacity: number;
+		role?: "reference";
 	}[];
+}
+
+interface ReferenceMeta {
+	id: string;
+	name: string;
+	mime: string;
+	imageWidth: number;
+	imageHeight: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	rotation: number;
+	opacity: number;
+	visible: boolean;
+	locked: boolean;
+	byteLength: number;
 }
 
 const clamp = (value: number, min: number, max: number) =>
@@ -190,6 +214,10 @@ export function serializeProject(
 			`Projects are limited to ${MAX_PROJECT_LAYERS} layers and ${MAX_PROJECT_FRAMES} frames.`,
 		);
 	}
+	if (doc.references.length > MAX_REFERENCE_COUNT) {
+		throw new Error(`Projects are limited to ${MAX_REFERENCE_COUNT} reference board images.`);
+	}
+
 	const meta: ProjectMeta = {
 		name,
 		palette,
@@ -201,6 +229,7 @@ export function serializeProject(
 			visible: layer.visible,
 			locked: layer.locked,
 			opacity: layer.opacity,
+			...(layer.role ? { role: layer.role } : {}),
 		})),
 	};
 	const metaBytes = new TextEncoder().encode(JSON.stringify(meta));
@@ -214,8 +243,44 @@ export function serializeProject(
 		}
 	}
 
+	let referenceBytes = 0;
+	const referenceMeta: ReferenceMeta[] = doc.references.map((reference) => {
+		if (reference.bytes.length > MAX_REFERENCE_BYTES) {
+			throw new Error(
+				`"${reference.name}" is too large to embed in a project file (limit ${Math.round(MAX_REFERENCE_BYTES / (1024 * 1024))} MB per reference).`,
+			);
+		}
+		referenceBytes += reference.bytes.length;
+		return {
+			id: reference.id,
+			name: reference.name,
+			mime: reference.mime,
+			imageWidth: reference.imageWidth,
+			imageHeight: reference.imageHeight,
+			x: reference.x,
+			y: reference.y,
+			width: reference.width,
+			height: reference.height,
+			rotation: reference.rotation,
+			opacity: reference.opacity,
+			visible: reference.visible,
+			locked: reference.locked,
+			byteLength: reference.bytes.length,
+		};
+	});
+	if (referenceBytes > MAX_TOTAL_REFERENCE_BYTES) {
+		throw new Error(
+			`Reference board images exceed the ${Math.round(MAX_TOTAL_REFERENCE_BYTES / (1024 * 1024))} MB project limit.`,
+		);
+	}
+	const referenceMetaBytes = new TextEncoder().encode(
+		JSON.stringify(referenceMeta),
+	);
+
 	let total = HEADER_SIZE + metaBytes.length;
 	for (const cel of cels) total += 1 + 4 + cel.bytes.length;
+	total += 4 + referenceMetaBytes.length;
+	for (const reference of doc.references) total += 4 + reference.bytes.length;
 	if (total > 2_000_000_000) {
 		throw new Error("This project is too large to save as a single file.");
 	}
@@ -250,6 +315,17 @@ export function serializeProject(
 		offset += 4;
 		bytes.set(cel.bytes, offset);
 		offset += cel.bytes.length;
+	}
+
+	view.setUint32(offset, referenceMetaBytes.length, true);
+	offset += 4;
+	bytes.set(referenceMetaBytes, offset);
+	offset += referenceMetaBytes.length;
+	for (const reference of doc.references) {
+		view.setUint32(offset, reference.bytes.length, true);
+		offset += 4;
+		bytes.set(reference.bytes, offset);
+		offset += reference.bytes.length;
 	}
 
 	return bytes;
@@ -383,7 +459,100 @@ function parseProjectBinary(bytes: Uint8Array): LoadedProject | null {
 			locked: rawLayer.locked === true,
 			opacity: clamp(Number(rawLayer.opacity ?? 1), 0, 1),
 			cels,
+			...(rawLayer.role === "reference" ? { role: "reference" as const } : {}),
 		});
+	}
+
+	if (offset + 4 > bytes.length) return null;
+	const referenceMetaLength = view.getUint32(offset, true);
+	offset += 4;
+	if (referenceMetaLength > bytes.length - offset) return null;
+
+	let referenceMeta: ReferenceMeta[];
+	try {
+		referenceMeta = JSON.parse(
+			new TextDecoder().decode(
+				bytes.subarray(offset, offset + referenceMetaLength),
+			),
+		) as ReferenceMeta[];
+	} catch {
+		return null;
+	}
+	offset += referenceMetaLength;
+	if (!Array.isArray(referenceMeta) || referenceMeta.length > MAX_REFERENCE_COUNT) {
+		return null;
+	}
+
+	const references: ReferenceImage[] = [];
+	let totalReferenceBytes = 0;
+	for (const rawReference of referenceMeta) {
+		if (!rawReference || typeof rawReference !== "object") return null;
+		if (offset + 4 > bytes.length) return null;
+		const length = view.getUint32(offset, true);
+		offset += 4;
+		if (
+			length !== rawReference.byteLength ||
+			length > MAX_REFERENCE_BYTES ||
+			length > bytes.length - offset
+		) {
+			return null;
+		}
+		totalReferenceBytes += length;
+		if (totalReferenceBytes > MAX_TOTAL_REFERENCE_BYTES) return null;
+
+		const imageWidth = clamp(
+			Math.round(Number(rawReference.imageWidth) || 1),
+			1,
+			16384,
+		);
+		const imageHeight = clamp(
+			Math.round(Number(rawReference.imageHeight) || 1),
+			1,
+			16384,
+		);
+		const width = clamp(
+			Number.isFinite(Number(rawReference.width))
+				? Math.round(Number(rawReference.width))
+				: imageWidth,
+			1,
+			16384,
+		);
+		const height = clamp(
+			Number.isFinite(Number(rawReference.height))
+				? Math.round(Number(rawReference.height))
+				: imageHeight,
+			1,
+			16384,
+		);
+
+		references.push({
+			id:
+				typeof rawReference.id === "string" && rawReference.id
+					? rawReference.id
+					: uid("reference"),
+			name:
+				typeof rawReference.name === "string" && rawReference.name.trim()
+					? rawReference.name
+					: `Reference ${references.length + 1}`,
+			bytes: bytes.slice(offset, offset + length),
+			mime:
+				typeof rawReference.mime === "string" && rawReference.mime
+					? rawReference.mime.slice(0, 120)
+					: "image/png",
+			imageWidth,
+			imageHeight,
+			x: Number.isFinite(Number(rawReference.x)) ? Number(rawReference.x) : 0,
+			y: Number.isFinite(Number(rawReference.y)) ? Number(rawReference.y) : 0,
+			width,
+			height,
+			rotation: Number.isFinite(Number(rawReference.rotation))
+				? Number(rawReference.rotation)
+				: 0,
+			opacity: clamp(Number(rawReference.opacity ?? 1), 0, 1),
+			visible: rawReference.visible !== false,
+			locked: rawReference.locked === true,
+		});
+		offset += length;
 	}
 
 	if (offset !== bytes.length) return null;
@@ -406,6 +575,7 @@ function parseProjectBinary(bytes: Uint8Array): LoadedProject | null {
 			fps,
 			frames: Array.from({ length: frameCount }, () => ({ id: uid("frame") })),
 			layers,
+			references,
 		},
 		palette: normalizePalette(meta.palette),
 		activeFrame,

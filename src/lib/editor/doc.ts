@@ -1,5 +1,5 @@
 import { packColor } from "./color.js";
-import type { BackgroundKind, Layer, PixelDoc } from "./types.js";
+import type { BackgroundKind, Layer, LayerRole, PixelDoc } from "./types.js";
 
 let idCounter = 0;
 
@@ -13,15 +13,22 @@ export function createLayer(
 	width: number,
 	height: number,
 	frameCount: number,
+	role?: LayerRole,
 ): Layer {
 	return {
 		id: uid("layer"),
 		name,
 		visible: true,
-		locked: false,
+		locked: role === "reference",
 		opacity: 1,
 		cels: Array.from({ length: frameCount }, () => new Uint32Array(width * height)),
+		...(role ? { role } : {}),
 	};
+}
+
+/** True for timeline reference layers, which cannot be drawn on. */
+export function isReferenceLayer(layer: Layer): boolean {
+	return layer.role === "reference";
 }
 
 export function createDoc(
@@ -48,6 +55,7 @@ export function createDoc(
 		fps: 12,
 		frames: [{ id: uid("frame") }],
 		layers: [layer],
+		references: [],
 	};
 }
 
@@ -65,7 +73,11 @@ export function cloneDoc(doc: PixelDoc): PixelDoc {
 			locked: layer.locked,
 			opacity: layer.opacity,
 			cels: layer.cels.map((cel) => new Uint32Array(cel)),
+			...(layer.role ? { role: layer.role } : {}),
 		})),
+		// Reference bytes are immutable, so history and project snapshots can
+		// share them while cloning the small transform metadata.
+		references: doc.references.map((reference) => ({ ...reference })),
 	};
 }
 
@@ -111,12 +123,20 @@ function blendPixelSlow(
 /**
  * Flattens every visible layer of a frame into a single RGBA pixel buffer.
  * The buffer uses the same packed little-endian format as layer cels.
+ *
+ * Reference layers are excluded by default so every export path is safe.
+ * Pass `includeReferences` for viewport rendering only.
  */
-export function compositeFrame(doc: PixelDoc, frameIndex: number): Uint32Array {
+export function compositeFrame(
+	doc: PixelDoc,
+	frameIndex: number,
+	includeReferences = false,
+): Uint32Array {
 	const count = doc.width * doc.height;
 	const output = new Uint32Array(count);
 
 	for (const layer of doc.layers) {
+		if (!includeReferences && layer.role === "reference") continue;
 		if (!layer.visible || layer.opacity <= 0) continue;
 		const cel = layer.cels[frameIndex];
 		if (!cel) continue;
@@ -190,7 +210,7 @@ export function compositePixel(
 
 interface CompositeCache {
 	revision: number;
-	frames: Map<number, Uint32Array>;
+	frames: Map<string, Uint32Array>;
 }
 
 const COMPOSITE_CACHE_LIMIT = 8;
@@ -198,13 +218,14 @@ const compositeCaches = new WeakMap<PixelDoc, CompositeCache>();
 
 /**
  * Memoized `compositeFrame` for the viewport and preview. The returned buffer
- * is shared and must be treated as read-only. Caches at most four frames per
- * document and drops everything when the document revision changes.
+ * is shared and must be treated as read-only. Caches at most eight variants
+ * per document and drops everything when the document revision changes.
  */
 export function compositeFrameCached(
 	doc: PixelDoc,
 	frameIndex: number,
 	revision: number,
+	includeReferences = false,
 ): Uint32Array {
 	let cache = compositeCaches.get(doc);
 	if (!cache || cache.revision !== revision) {
@@ -212,11 +233,12 @@ export function compositeFrameCached(
 		compositeCaches.set(doc, cache);
 	}
 
-	const existing = cache.frames.get(frameIndex);
+	const key = `${frameIndex}:${includeReferences ? 1 : 0}`;
+	const existing = cache.frames.get(key);
 	if (existing) return existing;
 
-	const pixels = compositeFrame(doc, frameIndex);
-	cache.frames.set(frameIndex, pixels);
+	const pixels = compositeFrame(doc, frameIndex, includeReferences);
+	cache.frames.set(key, pixels);
 	if (cache.frames.size > COMPOSITE_CACHE_LIMIT) {
 		const oldest = cache.frames.keys().next().value;
 		if (oldest !== undefined) cache.frames.delete(oldest);

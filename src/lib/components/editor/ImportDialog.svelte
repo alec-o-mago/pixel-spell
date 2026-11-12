@@ -1,8 +1,12 @@
 <script lang="ts">
 	import AlertTriangle from "@lucide/svelte/icons/alert-triangle";
+	import Film from "@lucide/svelte/icons/film";
 	import ImageIcon from "@lucide/svelte/icons/image";
+	import Images from "@lucide/svelte/icons/images";
+	import Layers from "@lucide/svelte/icons/layers";
 	import LoaderCircle from "@lucide/svelte/icons/loader-circle";
 	import PaletteIcon from "@lucide/svelte/icons/palette";
+	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import * as Dialog from "$lib/components/ui/dialog/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
@@ -23,11 +27,27 @@
 	let activeTab = $state<ImportTabId>("project");
 	let projectName = $state("");
 	let paletteName = $state("");
+	let layerName = $state("");
+	let referenceName = $state("");
+	let referenceAllFrames = $state(true);
 	let loadToken = 0;
 
 	const TAB_LABELS: Record<ImportTabId, string> = {
 		project: "Project",
+		layer: "Layer",
+		frames: "Frames",
+		"reference-layer": "Reference Layer",
+		"reference-board": "Reference Board",
 		palette: "Palette",
+	};
+
+	const ACTION_LABELS: Record<ImportTabId, string> = {
+		project: "Import Project",
+		layer: "Add Layer",
+		frames: "Add Frame",
+		"reference-layer": "Add Reference Layer",
+		"reference-board": "Add to Reference Board",
+		palette: "Import Palette",
 	};
 
 	const PALETTE_SOURCE_LABELS = {
@@ -37,19 +57,26 @@
 		hex: "HEX palette",
 	};
 
+	function tabAvailable(tab: ImportTabId): boolean {
+		if (tab === "project" || tab === "layer" || tab === "frames") {
+			return Boolean(analysis?.project);
+		}
+		if (tab === "reference-layer" || tab === "reference-board") {
+			return Boolean(analysis?.reference);
+		}
+		return Boolean(analysis?.palette);
+	}
+
 	let availableTabs = $derived.by((): ImportTabId[] => {
 		const tabs: ImportTabId[] = [];
-		if (analysis?.project) tabs.push("project");
+		if (analysis?.project) tabs.push("project", "layer", "frames");
+		if (analysis?.reference) tabs.push("reference-layer", "reference-board");
 		if (analysis?.palette) tabs.push("palette");
 		return tabs;
 	});
 
-	let canImport = $derived(
-		!loading &&
-			(activeTab === "project" ? Boolean(analysis?.project) : Boolean(analysis?.palette)),
-	);
-
-	let actionLabel = $derived(activeTab === "palette" ? "Import Palette" : "Import Project");
+	let canImport = $derived(!loading && Boolean(analysis) && tabAvailable(activeTab));
+	let actionLabel = $derived(ACTION_LABELS[activeTab]);
 
 	$effect(() => {
 		const selectedFile = file;
@@ -61,6 +88,9 @@
 		activeTab = "project";
 		projectName = "";
 		paletteName = "";
+		layerName = "";
+		referenceName = "";
+		referenceAllFrames = true;
 
 		analyzeImportFile(selectedFile)
 			.then((result) => {
@@ -75,12 +105,15 @@
 				activeTab = result.project ? "project" : result.palette ? "palette" : "project";
 				projectName = result.project?.name ?? "";
 				paletteName = result.palette?.name ?? "";
+				layerName = result.project?.name ?? "";
+				referenceName = result.reference?.name ?? "";
 			})
 			.catch(() => {
 				if (token !== loadToken) return;
 				analysis = {
 					fileName: selectedFile.name,
 					project: null,
+					reference: null,
 					palette: null,
 					error: "This file could not be read.",
 				};
@@ -112,6 +145,38 @@
 				width: analysis.project.width,
 				height: analysis.project.height,
 				pixels: analysis.project.pixels,
+			});
+		} else if (activeTab === "layer" && analysis.project) {
+			editor.importImageLayer({
+				name: layerName,
+				width: analysis.project.width,
+				height: analysis.project.height,
+				pixels: analysis.project.pixels,
+			});
+		} else if (activeTab === "frames" && analysis.project) {
+			editor.importImageFrame({
+				name: layerName,
+				width: analysis.project.width,
+				height: analysis.project.height,
+				pixels: analysis.project.pixels,
+			});
+		} else if (activeTab === "reference-layer" && analysis.reference) {
+			editor.importReferenceLayer(
+				{
+					name: layerName,
+					width: analysis.reference.pixelWidth,
+					height: analysis.reference.pixelHeight,
+					pixels: analysis.reference.pixels,
+				},
+				{ allFrames: referenceAllFrames },
+			);
+		} else if (activeTab === "reference-board" && analysis.reference) {
+			editor.addReferenceImage({
+				name: referenceName,
+				bytes: analysis.reference.bytes,
+				mime: analysis.reference.mime,
+				imageWidth: analysis.reference.width,
+				imageHeight: analysis.reference.height,
 			});
 		} else if (activeTab === "palette" && analysis.palette) {
 			editor.importPalette(paletteName, analysis.palette.colors);
@@ -154,7 +219,7 @@
 				<div
 					role="tablist"
 					aria-label="Import type"
-					class="inline-flex w-fit items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5"
+					class="grid grid-cols-3 gap-0.5 rounded-lg border bg-muted/40 p-0.5"
 				>
 					{#each availableTabs as tab (tab)}
 						<button
@@ -162,7 +227,7 @@
 							role="tab"
 							aria-selected={activeTab === tab}
 							class={cn(
-								"flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+								"flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
 								activeTab === tab
 									? "bg-background text-foreground shadow-sm ring-1 ring-border/60"
 									: "text-muted-foreground hover:text-foreground",
@@ -170,11 +235,19 @@
 							onclick={() => (activeTab = tab)}
 						>
 							{#if tab === "project"}
-								<ImageIcon class="size-3.5" />
+								<ImageIcon class="size-3.5 shrink-0" />
+							{:else if tab === "layer"}
+								<Layers class="size-3.5 shrink-0" />
+							{:else if tab === "frames"}
+								<Film class="size-3.5 shrink-0" />
+							{:else if tab === "reference-layer"}
+								<ScanEye class="size-3.5 shrink-0" />
+							{:else if tab === "reference-board"}
+								<Images class="size-3.5 shrink-0" />
 							{:else}
-								<PaletteIcon class="size-3.5" />
+								<PaletteIcon class="size-3.5 shrink-0" />
 							{/if}
-							{TAB_LABELS[tab]}
+							<span class="truncate">{TAB_LABELS[tab]}</span>
 						</button>
 					{/each}
 				</div>
@@ -229,6 +302,174 @@
 								</p>
 							</div>
 						{/if}
+					</div>
+				{:else if activeTab === "layer" && analysis.project}
+					{@const project = analysis.project}
+					<div role="tabpanel" aria-label="Layer import" class="grid gap-4">
+						<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+							<div class="grid content-start gap-1.5">
+								<Label for="import-layer-name">Layer name</Label>
+								<Input
+									id="import-layer-name"
+									bind:value={layerName}
+									maxlength={60}
+									placeholder="Imported layer"
+									autocomplete="off"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Adds a normal layer to the active project on frame
+									{editor.activeFrame + 1}. The image is placed at the top-left and
+									cropped to the canvas.
+								</p>
+							</div>
+							<div
+								class="checkerboard relative flex h-24 items-center justify-center overflow-hidden rounded-lg ring-1 ring-border"
+							>
+								<img
+									src={project.previewUrl}
+									alt="Preview of the file"
+									class="h-full w-full object-contain [image-rendering:pixelated]"
+								/>
+							</div>
+						</div>
+						<div
+							class="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+						>
+							<span class="font-mono tabular-nums">
+								{project.width} × {project.height} px image
+							</span>
+							<span class="font-mono tabular-nums">
+								{editor.doc.width} × {editor.doc.height} px canvas
+							</span>
+						</div>
+					</div>
+				{:else if activeTab === "frames" && analysis.project}
+					{@const project = analysis.project}
+					<div role="tabpanel" aria-label="Frame import" class="grid gap-4">
+						<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+							<div class="grid content-start gap-1.5">
+								<Label for="import-frame-layer-name">Layer name if needed</Label>
+								<Input
+									id="import-frame-layer-name"
+									bind:value={layerName}
+									maxlength={60}
+									placeholder="Imported frame"
+									autocomplete="off"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Adds a new frame after frame {editor.activeFrame + 1} and places the
+									image on the active normal layer. If no normal layer is available, a
+									new layer is created.
+								</p>
+							</div>
+							<div
+								class="checkerboard relative flex h-24 items-center justify-center overflow-hidden rounded-lg ring-1 ring-border"
+							>
+								<img
+									src={project.previewUrl}
+									alt="Preview of the file"
+									class="h-full w-full object-contain [image-rendering:pixelated]"
+								/>
+							</div>
+						</div>
+						<div
+							class="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+						>
+							<span class="font-mono tabular-nums">
+								{project.width} × {project.height} px image
+							</span>
+							<span>
+								{editor.frameCount} {editor.frameCount === 1 ? "frame" : "frames"} now
+							</span>
+						</div>
+					</div>
+				{:else if activeTab === "reference-layer" && analysis.project && analysis.reference}
+					{@const project = analysis.project}
+					{@const reference = analysis.reference}
+					<div role="tabpanel" aria-label="Reference layer import" class="grid gap-4">
+						<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+							<div class="grid content-start gap-1.5">
+								<Label for="import-reference-layer-name">Reference name</Label>
+								<Input
+									id="import-reference-layer-name"
+									bind:value={layerName}
+									maxlength={60}
+									placeholder="Reference"
+									autocomplete="off"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Adds a locked reference layer to the timeline. The image is fitted to
+									the canvas, cannot be drawn on, and is never exported.
+								</p>
+								<label class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+									<input
+										type="checkbox"
+										bind:checked={referenceAllFrames}
+										class="size-3.5 rounded border-input accent-primary"
+									/>
+									Apply to all frames
+								</label>
+							</div>
+							<div
+								class="checkerboard relative flex h-24 items-center justify-center overflow-hidden rounded-lg ring-1 ring-border"
+							>
+								<img
+									src={project.previewUrl}
+									alt="Preview of the file"
+									class="h-full w-full object-contain [image-rendering:pixelated]"
+								/>
+							</div>
+						</div>
+						<div
+							class="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+						>
+							<span class="font-mono tabular-nums">
+								{reference.width} × {reference.height} px source
+							</span>
+							<span class="font-mono tabular-nums">
+								fits {editor.doc.width} × {editor.doc.height} px canvas
+							</span>
+						</div>
+					</div>
+				{:else if activeTab === "reference-board" && analysis.reference}
+					{@const reference = analysis.reference}
+					<div role="tabpanel" aria-label="Reference board import" class="grid gap-4">
+						<div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+							<div class="grid content-start gap-1.5">
+								<Label for="import-reference-name">Reference name</Label>
+								<Input
+									id="import-reference-name"
+									bind:value={referenceName}
+									maxlength={60}
+									placeholder="Reference"
+									autocomplete="off"
+								/>
+								<p class="text-xs text-muted-foreground">
+									Adds an image to the project-level reference board. It is independent
+									of layers and frames, can be moved outside the canvas, and is never
+									exported.
+								</p>
+							</div>
+							{#if analysis.project}
+								<div
+									class="checkerboard relative flex h-24 items-center justify-center overflow-hidden rounded-lg ring-1 ring-border"
+								>
+									<img
+										src={analysis.project.previewUrl}
+										alt="Preview of the file"
+										class="h-full w-full object-contain [image-rendering:auto]"
+									/>
+								</div>
+							{/if}
+						</div>
+						<div
+							class="flex items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+						>
+							<span class="font-mono tabular-nums">
+								{reference.width} × {reference.height} px source
+							</span>
+							<span>Full resolution is embedded in the project</span>
+						</div>
 					</div>
 				{:else if activeTab === "palette" && analysis.palette}
 					{@const palette = analysis.palette}

@@ -3,6 +3,7 @@
 	import EyeOff from "@lucide/svelte/icons/eye-off";
 	import Lock from "@lucide/svelte/icons/lock";
 	import LockOpen from "@lucide/svelte/icons/lock-open";
+	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import { tick } from "svelte";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -12,6 +13,7 @@
 
 	let { layer }: { layer: Layer } = $props();
 
+	let isReference = $derived(layer.role === "reference");
 	let editing = $state(false);
 	let draft = $state("");
 	let input = $state<HTMLInputElement | null>(null);
@@ -70,9 +72,18 @@
 					"size-7 shrink-0",
 					layer.locked ? "text-foreground" : "text-muted-foreground",
 				)}
-				title={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
-				aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+				title={isReference
+					? "Reference layers are always locked"
+					: layer.locked
+						? `Unlock ${layer.name}`
+						: `Lock ${layer.name}`}
+				aria-label={isReference
+					? "Reference layers are always locked"
+					: layer.locked
+						? `Unlock ${layer.name}`
+						: `Lock ${layer.name}`}
 				aria-pressed={layer.locked}
+				disabled={isReference}
 				onclick={() => editor.toggleLayerLock(layer.id)}
 			>
 				{#if layer.locked}
@@ -109,9 +120,17 @@
 						aria-pressed={layer.id === editor.activeLayerId}
 						title="Double-click to rename"
 					>
-						<span class="block truncate text-xs font-medium">{layer.name}</span>
+						<span class="flex min-w-0 items-center gap-1">
+							{#if isReference}
+								<ScanEye class="size-3 shrink-0 text-primary" />
+							{/if}
+							<span class="truncate text-xs font-medium">{layer.name}</span>
+						</span>
 						<span class="block truncate text-[10px] text-muted-foreground">
 							{Math.round(layer.opacity * 100)}% · {layer.visible ? "Visible" : "Hidden"}
+							{#if isReference}
+								· Reference
+							{/if}
 						</span>
 					</button>
 				{/if}

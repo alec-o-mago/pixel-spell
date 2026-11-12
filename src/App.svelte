@@ -212,6 +212,7 @@
 		if (event.key === "Escape") {
 			editor.playing = false;
 			editor.clearSelection();
+			editor.clearReferenceSelection();
 		}
 	}
 </script>

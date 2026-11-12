@@ -9,6 +9,7 @@
 	import FlipVertical2 from "@lucide/svelte/icons/flip-vertical-2";
 	import FolderOpen from "@lucide/svelte/icons/folder-open";
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
+	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
 	import LineSquiggle from "@lucide/svelte/icons/line-squiggle";
@@ -190,6 +191,10 @@
 				<DropdownMenu.CheckboxItem bind:checked={editor.showPreview}>
 					<ScanEye class="size-4" />
 					Show preview
+				</DropdownMenu.CheckboxItem>
+				<DropdownMenu.CheckboxItem bind:checked={editor.showReferenceBoard}>
+					<Images class="size-4" />
+					Show reference board
 				</DropdownMenu.CheckboxItem>
 				<DropdownMenu.Item onSelect={() => editor.toggleTheme()}>
 					{#if editor.theme === "dark"}

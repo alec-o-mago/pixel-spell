@@ -6,6 +6,12 @@ import {
 	saveProjectFile,
 	type LoadedProject,
 } from "./file.js";
+import {
+	MAX_REFERENCE_COUNT,
+	cropPixelsToCanvas,
+	defaultReferencePlacement,
+	fitPixelsToCanvas,
+} from "./reference.js";
 import { selectionBounds } from "./selection.js";
 import {
 	DEFAULT_PALETTE_ID,
@@ -26,6 +32,7 @@ import type {
 	PixelDoc,
 	Point,
 	ProjectTab,
+	ReferenceImage,
 	ShapeKind,
 	ToolId,
 	ViewportSize,
@@ -69,6 +76,7 @@ interface ProjectSnapshot {
 	doc: PixelDoc;
 	activeLayerId: string;
 	activeFrame: number;
+	activeReferenceId: string | null;
 	zoom: number | null;
 	panX: number;
 	panY: number;
@@ -111,6 +119,8 @@ export class EditorState {
 	doc = $state<PixelDoc>(createDoc(32, 32));
 	activeLayerId = $state<string>(this.doc.layers[0].id);
 	activeFrame = $state(0);
+	/** Selected image on the project-level reference board. */
+	activeReferenceId = $state<string | null>(null);
 
 	tool = $state<ToolId>("pencil");
 	primaryColor = $state("#18181b");
@@ -163,6 +173,7 @@ export class EditorState {
 	showGrid = $state(true);
 	gridSize = $state(1);
 	showPreview = $state(false);
+	showReferenceBoard = $state(false);
 	zoom = $state<number | null>(null);
 	/** Canvas center offset from the stage center, in screen pixels. */
 	panX = $state(0);
@@ -213,6 +224,7 @@ export class EditorState {
 			doc: this.doc,
 			activeLayerId: this.activeLayerId,
 			activeFrame: this.activeFrame,
+			activeReferenceId: null,
 			zoom: this.zoom,
 			panX: 0,
 			panY: 0,
@@ -234,6 +246,28 @@ export class EditorState {
 			this.doc.layers.find((layer) => layer.id === this.activeLayerId) ??
 			this.doc.layers[this.doc.layers.length - 1]!
 		);
+	}
+
+	get activeReference(): ReferenceImage | null {
+		return (
+			this.doc.references.find(
+				(reference) => reference.id === this.activeReferenceId,
+			) ?? null
+		);
+	}
+
+	get activeLayerDrawable(): boolean {
+		const layer = this.activeLayer;
+		return (
+			!!layer &&
+			layer.role !== "reference" &&
+			!layer.locked &&
+			layer.visible
+		);
+	}
+
+	get referenceLayerCount(): number {
+		return this.doc.layers.filter((layer) => layer.role === "reference").length;
 	}
 
 	get activePalette(): Palette {
@@ -992,6 +1026,14 @@ export class EditorState {
 		if (!this.doc.layers.some((layer) => layer.id === this.activeLayerId)) {
 			this.activeLayerId = this.doc.layers[this.doc.layers.length - 1]!.id;
 		}
+		if (
+			this.activeReferenceId &&
+			!this.doc.references.some(
+				(reference) => reference.id === this.activeReferenceId,
+			)
+		) {
+			this.activeReferenceId = null;
+		}
 		this.activeFrame = clamp(this.activeFrame, 0, this.doc.frames.length - 1);
 		this.playing = false;
 		this.floating = null;
@@ -1018,6 +1060,7 @@ export class EditorState {
 		snapshot.doc = this.doc;
 		snapshot.activeLayerId = this.activeLayerId;
 		snapshot.activeFrame = this.activeFrame;
+		snapshot.activeReferenceId = this.activeReferenceId;
 		snapshot.zoom = this.zoom;
 		snapshot.panX = this.panX;
 		snapshot.panY = this.panY;
@@ -1038,6 +1081,7 @@ export class EditorState {
 		this.doc = snapshot.doc;
 		this.activeLayerId = snapshot.activeLayerId;
 		this.activeFrame = snapshot.activeFrame;
+		this.activeReferenceId = snapshot.activeReferenceId;
 		this.zoom = snapshot.zoom;
 		this.panX = snapshot.panX;
 		this.panY = snapshot.panY;
@@ -1133,6 +1177,7 @@ export class EditorState {
 			doc,
 			activeLayerId: doc.layers[0].id,
 			activeFrame: 0,
+			activeReferenceId: null,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -1161,6 +1206,7 @@ export class EditorState {
 			doc,
 			activeLayerId,
 			activeFrame,
+			activeReferenceId: null,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -1202,6 +1248,7 @@ export class EditorState {
 					cels: [pixels],
 				},
 			],
+			references: [],
 		};
 
 		const requestedName = image.name.trim().slice(0, 60);
@@ -1213,6 +1260,7 @@ export class EditorState {
 			doc,
 			activeLayerId: doc.layers[0]!.id,
 			activeFrame: 0,
+			activeReferenceId: null,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -1225,6 +1273,295 @@ export class EditorState {
 		});
 		this.projects.push({ id, name, dirty: true, modified: true });
 		this.#activateProject(id);
+	}
+
+	/** Adds an imported image as a new normal layer on the active frame. */
+	importImageLayer(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		this.pushHistory();
+		const layer = createLayer(
+			image.name.trim().slice(0, 60) || "Imported layer",
+			this.doc.width,
+			this.doc.height,
+			this.doc.frames.length,
+		);
+		const cel = layer.cels[this.activeFrame]!;
+		cel.set(
+			cropPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.doc.layers.push(layer);
+		this.activeLayerId = layer.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Adds an imported image as a new frame on a normal layer. */
+	importImageFrame(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		if (this.doc.frames.length >= MAX_PROJECT_FRAMES) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		const active = this.activeLayer;
+		let target =
+			active && active.role !== "reference" && !active.locked ? active : null;
+		if (!target) {
+			for (let index = this.doc.layers.length - 1; index >= 0; index--) {
+				const layer = this.doc.layers[index]!;
+				if (layer.role !== "reference" && !layer.locked && layer.visible) {
+					target = layer;
+					break;
+				}
+			}
+		}
+
+		if (!target && this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		this.pushHistory();
+		if (!target) {
+			target = createLayer(
+				image.name.trim().slice(0, 60) || "Imported frame",
+				this.doc.width,
+				this.doc.height,
+				this.doc.frames.length,
+			);
+			this.doc.layers.push(target);
+		}
+
+		const index = this.activeFrame + 1;
+		this.doc.frames.splice(index, 0, { id: uid("frame") });
+		for (const layer of this.doc.layers) {
+			const source =
+				layer.role === "reference" ? layer.cels[this.activeFrame] : undefined;
+			layer.cels.splice(
+				index,
+				0,
+				source
+					? new Uint32Array(source)
+					: new Uint32Array(this.doc.width * this.doc.height),
+			);
+		}
+
+		const cel = target.cels[index]!;
+		cel.set(
+			cropPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.activeFrame = index;
+		this.activeLayerId = target.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Adds a locked, non-exported reference layer to the timeline. */
+	importReferenceLayer(
+		image: {
+			name: string;
+			width: number;
+			height: number;
+			pixels: Uint32Array;
+		},
+		options: { allFrames?: boolean } = {},
+	): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		this.pushHistory();
+		const layer = createLayer(
+			image.name.trim().slice(0, 60) || "Reference",
+			this.doc.width,
+			this.doc.height,
+			this.doc.frames.length,
+			"reference",
+		);
+		const fitted = fitPixelsToCanvas(
+			image.pixels,
+			imageWidth,
+			imageHeight,
+			this.doc.width,
+			this.doc.height,
+		);
+		const allFrames = options.allFrames ?? true;
+		if (allFrames) {
+			for (const cel of layer.cels) cel.set(fitted);
+		} else {
+			layer.cels[this.activeFrame]?.set(fitted);
+		}
+
+		this.doc.layers.push(layer);
+		this.activeLayerId = layer.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/**
+	 * Replaces the active reference layer's cel on the current frame. Returns
+	 * false when the active layer is not a reference layer.
+	 */
+	setReferenceLayerImage(image: {
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): boolean {
+		const layer = this.activeLayer;
+		if (!layer || layer.role !== "reference") return false;
+		const cel = layer.cels[this.activeFrame];
+		if (!cel) return false;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return false;
+
+		this.pushHistoryCel(layer.id, this.activeFrame);
+		cel.set(
+			fitPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.revision++;
+		return true;
+	}
+
+	/** Adds an image to the project-level reference board. */
+	addReferenceImage(image: {
+		name: string;
+		bytes: Uint8Array;
+		mime: string;
+		imageWidth: number;
+		imageHeight: number;
+	}): string | null {
+		if (this.doc.references.length >= MAX_REFERENCE_COUNT) return null;
+		if (image.bytes.length === 0) return null;
+		const imageWidth = Math.max(1, Math.round(image.imageWidth));
+		const imageHeight = Math.max(1, Math.round(image.imageHeight));
+
+		this.pushHistory();
+		const placement = defaultReferencePlacement(
+			this.doc.width,
+			this.doc.height,
+			imageWidth,
+			imageHeight,
+			this.doc.references,
+		);
+		const reference: ReferenceImage = {
+			id: uid("reference"),
+			name: image.name.trim().slice(0, 60) || "Reference",
+			bytes: image.bytes,
+			mime: image.mime || "image/png",
+			imageWidth,
+			imageHeight,
+			x: placement.x,
+			y: placement.y,
+			width: placement.width,
+			height: placement.height,
+			rotation: 0,
+			opacity: 1,
+			visible: true,
+			locked: false,
+		};
+		this.doc.references.push(reference);
+		this.activeReferenceId = reference.id;
+		this.showReferenceBoard = true;
+		this.structureRevision++;
+		return reference.id;
+	}
+
+	removeReferenceImage(id: string): void {
+		const index = this.doc.references.findIndex(
+			(reference) => reference.id === id,
+		);
+		if (index < 0) return;
+		this.pushHistory();
+		this.doc.references.splice(index, 1);
+		if (this.activeReferenceId === id) this.activeReferenceId = null;
+		this.structureRevision++;
+	}
+
+	moveReferenceImage(id: string, x: number, y: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || reference.locked || !Number.isFinite(x) || !Number.isFinite(y)) {
+			return;
+		}
+		reference.x = x;
+		reference.y = y;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceSize(id: string, width: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(width)) return;
+		const nextWidth = clamp(Math.round(width), 1, 8192);
+		const ratio = reference.imageHeight / Math.max(1, reference.imageWidth);
+		reference.width = nextWidth;
+		reference.height = clamp(Math.round(nextWidth * ratio), 1, 8192);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceOpacity(id: string, opacity: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(opacity)) return;
+		reference.opacity = clamp(opacity, 0, 1);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	renameReference(id: string, name: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		const trimmed = name.trim();
+		if (!reference || !trimmed) return;
+		reference.name = trimmed.slice(0, 60);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	toggleReferenceVisibility(id: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference) return;
+		reference.visible = !reference.visible;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	toggleReferenceLock(id: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference) return;
+		reference.locked = !reference.locked;
+		this.dirty = true;
+		this.modified = true;
 	}
 
 	markSaved(): void {
@@ -1255,9 +1592,24 @@ export class EditorState {
 
 	selectLayer(id: string): void {
 		if (!this.doc.layers.some((layer) => layer.id === id)) return;
-		if (id === this.activeLayerId) return;
 		if (this.floating) this.commitFloatingSelection();
+		this.activeReferenceId = null;
+		if (id === this.activeLayerId) return;
 		this.activeLayerId = id;
+	}
+
+	selectReferenceImage(id: string | null): void {
+		if (
+			id !== null &&
+			!this.doc.references.some((reference) => reference.id === id)
+		) {
+			return;
+		}
+		this.activeReferenceId = id;
+	}
+
+	clearReferenceSelection(): void {
+		this.activeReferenceId = null;
 	}
 
 	toggleLayerVisibility(id: string): void {
@@ -1271,7 +1623,7 @@ export class EditorState {
 
 	toggleLayerLock(id: string): void {
 		const layer = this.doc.layers.find((item) => item.id === id);
-		if (!layer) return;
+		if (!layer || layer.role === "reference") return;
 		layer.locked = !layer.locked;
 		this.dirty = true;
 		this.modified = true;
@@ -1320,9 +1672,10 @@ export class EditorState {
 			id: uid("layer"),
 			name: `${source.name} copy`,
 			visible: source.visible,
-			locked: false,
+			locked: source.role === "reference",
 			opacity: source.opacity,
 			cels: source.cels.map((cel) => new Uint32Array(cel)),
+			...(source.role ? { role: source.role } : {}),
 		};
 		const index = this.doc.layers.findIndex((layer) => layer.id === source.id);
 		this.doc.layers.splice(index + 1, 0, copy);
@@ -1405,7 +1758,7 @@ export class EditorState {
 
 	clearLayer(): void {
 		const layer = this.activeLayer;
-		if (!layer) return;
+		if (!layer || layer.role === "reference") return;
 		this.pushHistoryCel(layer.id, this.activeFrame);
 		const cel = layer.cels[this.activeFrame];
 		if (cel) this.#clearCel(cel);
@@ -1414,10 +1767,13 @@ export class EditorState {
 
 	clearFrame(): void {
 		const frame = this.activeFrame;
-		this.pushHistoryCels(
-			this.doc.layers.map((layer) => ({ layerId: layer.id, frame })),
+		const editableLayers = this.doc.layers.filter(
+			(layer) => layer.role !== "reference",
 		);
-		for (const layer of this.doc.layers) {
+		this.pushHistoryCels(
+			editableLayers.map((layer) => ({ layerId: layer.id, frame })),
+		);
+		for (const layer of editableLayers) {
 			const cel = layer.cels[frame];
 			if (cel) this.#clearCel(cel);
 		}
@@ -1459,7 +1815,16 @@ export class EditorState {
 		const index = this.activeFrame + 1;
 		this.doc.frames.splice(index, 0, { id: uid("frame") });
 		for (const layer of this.doc.layers) {
-			layer.cels.splice(index, 0, new Uint32Array(this.doc.width * this.doc.height));
+			// A static reference should stay visible on a newly inserted frame.
+			const source =
+				layer.role === "reference" ? layer.cels[this.activeFrame] : undefined;
+			layer.cels.splice(
+				index,
+				0,
+				source
+					? new Uint32Array(source)
+					: new Uint32Array(this.doc.width * this.doc.height),
+			);
 		}
 		this.activeFrame = index;
 		this.structureRevision++;

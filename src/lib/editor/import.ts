@@ -19,6 +19,10 @@ export const IMAGE_IMPORT_EXTENSIONS = [
 const IMAGE_EXTENSIONS = new Set<string>(IMAGE_IMPORT_EXTENSIONS);
 const PALETTE_EXTENSIONS = new Set(["pal", "gpl", "hex"]);
 
+export const IMAGE_IMPORT_ACCEPT = IMAGE_IMPORT_EXTENSIONS.map(
+	(extension) => `.${extension}`,
+).join(",");
+
 export const IMPORT_ACCEPT = [...IMAGE_IMPORT_EXTENSIONS, ...PALETTE_EXTENSIONS]
 	.map((extension) => `.${extension}`)
 	.join(",");
@@ -38,7 +42,13 @@ const MAX_PALETTE_SCAN_PIXELS = 32_000_000;
 const MAX_PALETTE_SCAN_DIMENSION = 8192;
 const PALETTE_SCAN_BAND_HEIGHT = 128;
 
-export type ImportTabId = "project" | "palette";
+export type ImportTabId =
+	| "project"
+	| "layer"
+	| "frames"
+	| "reference-layer"
+	| "reference-board"
+	| "palette";
 
 export interface ImportProjectData {
 	name: string;
@@ -61,9 +71,27 @@ export interface ImportPaletteData {
 	source: "png" | "pal" | "gpl" | "hex";
 }
 
+/** The original image bytes and a canvas-ready buffer for reference features. */
+export interface ImportReferenceData {
+	name: string;
+	bytes: Uint8Array;
+	mime: string;
+	/** Natural source dimensions. */
+	width: number;
+	height: number;
+	/**
+	 * The complete image fitted inside MAX_IMPORT_DIMENSION without cropping.
+	 * Reference layers use this so large images are not reduced to a corner.
+	 */
+	pixels: Uint32Array;
+	pixelWidth: number;
+	pixelHeight: number;
+}
+
 export interface ImportAnalysis {
 	fileName: string;
 	project: ImportProjectData | null;
+	reference: ImportReferenceData | null;
 	palette: ImportPaletteData | null;
 	error: string | null;
 }
@@ -117,6 +145,34 @@ function mimeExtension(type: string): string {
 
 function resolvedExtension(file: File): string {
 	return fileExtension(file.name) || mimeExtension(file.type);
+}
+
+function resolvedMime(file: File, extension: string): string {
+	if (file.type) return file.type;
+	switch (extension) {
+		case "png":
+			return "image/png";
+		case "apng":
+			return "image/apng";
+		case "jpg":
+		case "jpeg":
+		case "jfif":
+			return "image/jpeg";
+		case "gif":
+			return "image/gif";
+		case "webp":
+			return "image/webp";
+		case "bmp":
+			return "image/bmp";
+		case "avif":
+			return "image/avif";
+		case "ico":
+			return "image/x-icon";
+		case "svg":
+			return "image/svg+xml";
+		default:
+			return "application/octet-stream";
+	}
 }
 
 /** File name without its extension, used as the default import name. */
@@ -196,6 +252,49 @@ function readProjectPixels(
 	);
 
 	return { width: cropWidth, height: cropHeight, pixels };
+}
+
+/**
+ * Reads the whole image, scaled down to fit within `maxDimension`. Unlike
+ * `readProjectPixels` this never crops the image, which makes it suitable for
+ * reference layers that are fitted to the canvas later.
+ */
+function readFittedPixels(
+	source: CanvasImageSource,
+	width: number,
+	height: number,
+	maxDimension: number,
+): { width: number; height: number; pixels: Uint32Array } {
+	const scale = Math.min(1, maxDimension / width, maxDimension / height);
+	const fittedWidth = Math.max(1, Math.round(width * scale));
+	const fittedHeight = Math.max(1, Math.round(height * scale));
+
+	const canvas = document.createElement("canvas");
+	canvas.width = fittedWidth;
+	canvas.height = fittedHeight;
+	const context = canvas.getContext("2d", { willReadFrequently: true });
+	if (!context) throw new Error("Canvas 2D is not available");
+
+	context.imageSmoothingEnabled = false;
+	context.drawImage(
+		source,
+		0,
+		0,
+		width,
+		height,
+		0,
+		0,
+		fittedWidth,
+		fittedHeight,
+	);
+
+	const image = context.getImageData(0, 0, fittedWidth, fittedHeight);
+	const pixels = new Uint32Array(
+		image.data.buffer,
+		image.data.byteOffset,
+		fittedWidth * fittedHeight,
+	);
+	return { width: fittedWidth, height: fittedHeight, pixels };
 }
 
 function collectPaletteColors(
@@ -388,6 +487,7 @@ export async function analyzeImportFile(file: File): Promise<ImportAnalysis> {
 		return {
 			fileName: file.name,
 			project: null,
+			reference: null,
 			palette: null,
 			error: `This file is larger than ${Math.round(MAX_IMPORT_FILE_BYTES / (1024 * 1024))} MB. Choose a smaller image or palette.`,
 		};
@@ -398,6 +498,7 @@ export async function analyzeImportFile(file: File): Promise<ImportAnalysis> {
 	const isPalette = PALETTE_EXTENSIONS.has(extension);
 
 	let project: ImportProjectData | null = null;
+	let reference: ImportReferenceData | null = null;
 	let palette: ImportPaletteData | null = null;
 	let error: string | null = null;
 
@@ -414,6 +515,22 @@ export async function analyzeImportFile(file: File): Promise<ImportAnalysis> {
 				originalHeight: decoded.height,
 				pixels: cropped.pixels,
 				previewUrl: decoded.previewUrl,
+			};
+			const fitted = readFittedPixels(
+				decoded.source,
+				decoded.width,
+				decoded.height,
+				MAX_IMPORT_DIMENSION,
+			);
+			reference = {
+				name: importNameFromFile(file.name),
+				bytes: new Uint8Array(await file.arrayBuffer()),
+				mime: resolvedMime(file, extension),
+				width: decoded.width,
+				height: decoded.height,
+				pixels: fitted.pixels,
+				pixelWidth: fitted.width,
+				pixelHeight: fitted.height,
 			};
 
 			if (extension === "png") {
@@ -471,5 +588,5 @@ export async function analyzeImportFile(file: File): Promise<ImportAnalysis> {
 		error ??= UNSUPPORTED_MESSAGE;
 	}
 
-	return { fileName: file.name, project, palette, error };
+	return { fileName: file.name, project, reference, palette, error };
 }
