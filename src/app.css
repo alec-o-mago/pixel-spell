@@ -224,6 +224,29 @@ canvas {
 	display: none;
 }
 
+/* Blue halo that grows in and shrinks out when the color slot is selected. */
+.color-slot-ring {
+	box-shadow:
+		0 0 0 0 transparent,
+		0 0 0 0 transparent;
+	transition:
+		box-shadow 180ms ease-out,
+		border-color 180ms ease-out,
+		background-color 180ms ease-out;
+}
+
+.color-slot-active {
+	box-shadow:
+		0 0 0 2px var(--primary),
+		0 0 0 4px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.color-slot-ring {
+		transition: none;
+	}
+}
+
 /* Native range inputs used by the inline color picker. */
 .color-range {
 	-webkit-appearance: none;

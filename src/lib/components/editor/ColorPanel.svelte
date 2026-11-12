@@ -241,9 +241,9 @@
 			<button
 				type="button"
 				class={cn(
-					"flex items-center gap-2 rounded-lg border p-1.5 text-left transition-colors",
+					"color-slot-ring flex items-center gap-2 rounded-lg border p-1.5 text-left",
 					slot === "primary"
-						? "border-ring bg-accent text-foreground"
+						? "color-slot-active border-primary bg-accent text-foreground"
 						: "text-muted-foreground hover:bg-accent/60",
 				)}
 				onclick={() => (editor.activeColorSlot = "primary")}
@@ -277,9 +277,9 @@
 			<button
 				type="button"
 				class={cn(
-					"flex items-center gap-2 rounded-lg border p-1.5 text-left transition-colors",
+					"color-slot-ring flex items-center gap-2 rounded-lg border p-1.5 text-left",
 					slot === "secondary"
-						? "border-ring bg-accent text-foreground"
+						? "color-slot-active border-primary bg-accent text-foreground"
 						: "text-muted-foreground hover:bg-accent/60",
 				)}
 				onclick={() => (editor.activeColorSlot = "secondary")}
