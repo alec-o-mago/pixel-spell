@@ -23,7 +23,8 @@
 	let loading = $state(false);
 	let error = $state("");
 	let opacity = $state(100);
-	let width = $state(64);
+	let zoom = $state(100);
+	let rotation = $state(0);
 	let nameDraft = $state("");
 
 	let active = $derived(editor.activeReference);
@@ -35,7 +36,10 @@
 	$effect(() => {
 		const reference = active;
 		opacity = reference ? Math.round(reference.opacity * 100) : 100;
-		width = reference ? Math.round(reference.width) : 64;
+		zoom = reference
+			? Math.max(1, (reference.width / Math.max(1, reference.imageWidth)) * 100)
+			: 100;
+		rotation = reference?.rotation ?? 0;
 		nameDraft = reference?.name ?? "";
 	});
 
@@ -76,8 +80,12 @@
 		if (active) editor.setReferenceOpacity(active.id, value / 100);
 	}
 
-	function changeWidth(): void {
-		if (active) editor.setReferenceSize(active.id, width);
+	function changeZoom(value: number): void {
+		if (active) editor.setReferenceZoom(active.id, value / 100);
+	}
+
+	function changeRotation(value: number): void {
+		if (active) editor.setReferenceRotation(active.id, value);
 	}
 
 	function close(): void {
@@ -254,20 +262,36 @@
 					</span>
 				</div>
 				<div class="flex items-center gap-2">
-					<span class="w-14 text-[10px] text-muted-foreground">Width</span>
-					<Input
-						type="number"
+					<span class="w-14 text-[10px] text-muted-foreground">Zoom</span>
+					<Slider
+						type="single"
 						min={1}
-						max={8192}
-						bind:value={width}
-						class="h-7 w-20 font-mono text-[11px]"
-						aria-label="Reference width in document pixels"
-						onchange={changeWidth}
-						onkeydown={(event) => {
-							if (event.key === "Enter") event.currentTarget.blur();
-						}}
+						max={400}
+						step={1}
+						bind:value={zoom}
+						onValueChange={changeZoom}
+						class="flex-1"
+						aria-label="Reference zoom"
 					/>
-					<span class="text-[10px] text-muted-foreground">document px</span>
+					<span class="w-9 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+						{Math.round(zoom)}%
+					</span>
+				</div>
+				<div class="flex items-center gap-2">
+					<span class="w-14 text-[10px] text-muted-foreground">Rotation</span>
+					<Slider
+						type="single"
+						min={-180}
+						max={180}
+						step={1}
+						bind:value={rotation}
+						onValueChange={changeRotation}
+						class="flex-1"
+						aria-label="Reference rotation"
+					/>
+					<span class="w-9 text-right font-mono text-[10px] tabular-nums text-muted-foreground">
+						{Math.round(rotation)}°
+					</span>
 				</div>
 			</footer>
 		{/if}

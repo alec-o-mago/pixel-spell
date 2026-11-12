@@ -411,11 +411,21 @@
 		if (!reference || reference.locked || !reference.visible) return null;
 		const point = documentPointFromEvent(event);
 		if (!point) return null;
+
+		const centerX = reference.x + reference.width / 2;
+		const centerY = reference.y + reference.height / 2;
+		const dx = point.x - centerX;
+		const dy = point.y - centerY;
+		const radians = (reference.rotation * Math.PI) / 180;
+		const cosine = Math.cos(radians);
+		const sine = Math.sin(radians);
+		// Undo the reference's own rotation before testing its local bounds.
+		const localX = dx * cosine + dy * sine;
+		const localY = -dx * sine + dy * cosine;
+
 		if (
-			point.x < reference.x ||
-			point.y < reference.y ||
-			point.x > reference.x + reference.width ||
-			point.y > reference.y + reference.height
+			Math.abs(localX) > reference.width / 2 ||
+			Math.abs(localY) > reference.height / 2
 		) {
 			return null;
 		}

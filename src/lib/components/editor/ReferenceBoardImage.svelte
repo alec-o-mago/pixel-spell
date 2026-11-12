@@ -30,7 +30,7 @@
 		alt={reference.name}
 		draggable="false"
 		class={cn(
-			"pointer-events-none absolute select-none [image-rendering:auto]",
+			"pointer-events-none absolute max-h-none max-w-none select-none [image-rendering:auto]",
 			active && "outline outline-2 outline-primary outline-offset-2",
 		)}
 		style:left={`${reference.x * zoom}px`}

@@ -1531,6 +1531,32 @@ export class EditorState {
 		this.modified = true;
 	}
 
+	setReferenceZoom(id: string, zoom: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(zoom)) return;
+		const nextZoom = clamp(zoom, 0.01, 4);
+		reference.width = clamp(
+			Math.round(reference.imageWidth * nextZoom),
+			1,
+			16384,
+		);
+		reference.height = clamp(
+			Math.round(reference.imageHeight * nextZoom),
+			1,
+			16384,
+		);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceRotation(id: string, rotation: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(rotation)) return;
+		reference.rotation = clamp(rotation, -180, 180);
+		this.dirty = true;
+		this.modified = true;
+	}
+
 	setReferenceOpacity(id: string, opacity: number): void {
 		const reference = this.doc.references.find((item) => item.id === id);
 		if (!reference || !Number.isFinite(opacity)) return;
