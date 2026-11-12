@@ -32,6 +32,7 @@ import type {
 	PixelDoc,
 	Point,
 	ProjectTab,
+	RadialSymmetry,
 	ReferenceImage,
 	ShapeKind,
 	ToolId,
@@ -45,6 +46,10 @@ const MIN_SIZE = 1;
 const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
+
+/** Radial symmetry copies include the original stroke point. */
+export const RADIAL_SYMMETRY_MIN = 2;
+export const RADIAL_SYMMETRY_MAX = 16;
 
 const clamp = (value: number, min: number, max: number) =>
 	Math.max(min, Math.min(max, value));
@@ -147,6 +152,12 @@ export class EditorState {
 	mirrorYOffset = $state(0);
 	mirrorDiagonalDownOffset = $state(0);
 	mirrorDiagonalUpOffset = $state(0);
+	radialEnabled = $state(false);
+	/** Number of rotational copies, including the original (2–16). */
+	radialCount = $state(6);
+	/** Radial symmetry center offset from the canvas center, in document pixels. */
+	radialCenterX = $state(0);
+	radialCenterY = $state(0);
 	lockAlpha = $state(false);
 	pixelPerfect = $state(false);
 	shapeFilled = $state(false);
@@ -333,6 +344,27 @@ export class EditorState {
 		}
 
 		return axes;
+	}
+
+	get radialSymmetry(): RadialSymmetry | null {
+		if (!this.radialEnabled) return null;
+		return {
+			count: clamp(
+				Math.round(this.radialCount),
+				RADIAL_SYMMETRY_MIN,
+				RADIAL_SYMMETRY_MAX,
+			),
+			centerX: clamp(
+				this.doc.width / 2 + this.radialCenterX,
+				0,
+				this.doc.width,
+			),
+			centerY: clamp(
+				this.doc.height / 2 + this.radialCenterY,
+				0,
+				this.doc.height,
+			),
+		};
 	}
 
 	get currentColor(): number {
@@ -656,7 +688,50 @@ export class EditorState {
 			this.mirrorDiagonalUp = !this.mirrorDiagonalUp;
 			if (!this.mirrorDiagonalUp) this.mirrorDiagonalUpOffset = 0;
 		}
+
+		// Radial and axis mirrors are mutually exclusive.
+		if (
+			this.mirrorX ||
+			this.mirrorY ||
+			this.mirrorDiagonalDown ||
+			this.mirrorDiagonalUp
+		) {
+			this.radialEnabled = false;
+		}
 		// Mirror guides have their own overlay; the sprite pixels do not change.
+	}
+
+	toggleRadial(): void {
+		this.radialEnabled = !this.radialEnabled;
+		if (!this.radialEnabled) return;
+		// Enabling radial symmetry clears every axis mirror.
+		this.#disableMirrors();
+	}
+
+	setRadialCount(count: number): void {
+		if (!Number.isFinite(count)) return;
+		this.radialCount = clamp(
+			Math.round(count),
+			RADIAL_SYMMETRY_MIN,
+			RADIAL_SYMMETRY_MAX,
+		);
+	}
+
+	setRadialCenter(x: number, y: number): void {
+		if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+		this.radialCenterX = clamp(x, 0, this.doc.width) - this.doc.width / 2;
+		this.radialCenterY = clamp(y, 0, this.doc.height) - this.doc.height / 2;
+	}
+
+	#disableMirrors(): void {
+		this.mirrorX = false;
+		this.mirrorY = false;
+		this.mirrorDiagonalDown = false;
+		this.mirrorDiagonalUp = false;
+		this.mirrorXOffset = 0;
+		this.mirrorYOffset = 0;
+		this.mirrorDiagonalDownOffset = 0;
+		this.mirrorDiagonalUpOffset = 0;
 	}
 
 	setMirrorPosition(kind: MirrorKind, position: number): void {

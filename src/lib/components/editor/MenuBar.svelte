@@ -1,4 +1,6 @@
 <script lang="ts">
+	import Asterisk from "@lucide/svelte/icons/asterisk";
+	import ChevronDown from "@lucide/svelte/icons/chevron-down";
 	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
 	import Copy from "@lucide/svelte/icons/copy";
 	import Eraser from "@lucide/svelte/icons/eraser";
@@ -30,7 +32,11 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import { readProjectFile } from "$lib/editor/file.js";
-	import { editor } from "$lib/editor/editor.svelte.js";
+	import {
+		editor,
+		RADIAL_SYMMETRY_MAX,
+		RADIAL_SYMMETRY_MIN,
+	} from "$lib/editor/editor.svelte.js";
 
 	let {
 		onNew,
@@ -48,6 +54,10 @@
 
 	let fileInput: HTMLInputElement | undefined;
 	let cursor = $derived(editor.cursor ?? editor.lastCursor);
+	const RADIAL_COUNTS = Array.from(
+		{ length: RADIAL_SYMMETRY_MAX - RADIAL_SYMMETRY_MIN + 1 },
+		(_, index) => RADIAL_SYMMETRY_MIN + index,
+	);
 
 	function activeRing(active: boolean): string {
 		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
@@ -385,6 +395,70 @@
 				Diagonal / mirror
 			</Tooltip.Content>
 		</Tooltip.Root>
+
+		<Separator orientation="vertical" class="mx-1 h-5" />
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="icon-sm"
+						class={`text-muted-foreground ${activeRing(editor.radialEnabled)}`}
+						onclick={() => editor.toggleRadial()}
+						aria-label="Toggle radial symmetry"
+						aria-pressed={editor.radialEnabled}
+					>
+						<Asterisk class="size-4" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				{editor.radialEnabled
+					? `Radial symmetry — ${editor.radialCount}-fold`
+					: "Radial symmetry"}
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<DropdownMenu.Root>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props: tooltipProps })}
+						<DropdownMenu.Trigger>
+							{#snippet child({ props: menuProps })}
+								<Button
+									{...tooltipProps}
+									{...menuProps}
+									variant="ghost"
+									size="icon-sm"
+									class="text-muted-foreground"
+									aria-label="Radial symmetry settings"
+								>
+									<ChevronDown class="size-4" />
+								</Button>
+							{/snippet}
+						</DropdownMenu.Trigger>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+					Radial symmetry settings
+				</Tooltip.Content>
+			</Tooltip.Root>
+			<DropdownMenu.Content class="w-44" side="bottom" align="end">
+				<DropdownMenu.Label>Symmetry count</DropdownMenu.Label>
+				<DropdownMenu.RadioGroup
+					value={String(editor.radialCount)}
+					onValueChange={(value) => editor.setRadialCount(Number(value))}
+				>
+					{#each RADIAL_COUNTS as count (count)}
+						<DropdownMenu.RadioItem value={String(count)} closeOnSelect>
+							{count}-fold
+						</DropdownMenu.RadioItem>
+					{/each}
+				</DropdownMenu.RadioGroup>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
 
 		<Separator orientation="vertical" class="mx-1 h-5" />
 

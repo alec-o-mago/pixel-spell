@@ -2,20 +2,44 @@ import type {
 	GradientDither,
 	GradientShape,
 	MirrorAxis,
+	RadialSymmetry,
 	ShapeKind,
 } from "./types.js";
 
 export type PixelWriter = (x: number, y: number) => void;
 
-function forEachMirroredPoint(
+/**
+ * Cosine/sine pairs for one full turn, cached per symmetry count. Radial
+ * symmetry can stamp the same point many times per brush pixel, so rebuilding
+ * the trigonometry for every pixel would be needlessly expensive.
+ */
+const radialRotationCache = new Map<number, readonly { cos: number; sin: number }[]>();
+
+function radialRotations(count: number): readonly { cos: number; sin: number }[] {
+	const rounded = Math.max(2, Math.round(count));
+	const cached = radialRotationCache.get(rounded);
+	if (cached) return cached;
+
+	const step = (Math.PI * 2) / rounded;
+	const rotations = Array.from({ length: rounded - 1 }, (_, index) => {
+		const angle = step * (index + 1);
+		return { cos: Math.cos(angle), sin: Math.sin(angle) };
+	});
+	radialRotationCache.set(rounded, rotations);
+	return rotations;
+}
+
+function forEachSymmetryPoint(
 	x: number,
 	y: number,
 	width: number,
 	height: number,
 	mirrors: readonly MirrorAxis[],
+	radial: RadialSymmetry | null,
 	write: PixelWriter,
 ): void {
 	const combinations = 1 << mirrors.length;
+	const rotations = radial ? radialRotations(radial.count) : [];
 
 	for (let mask = 0; mask < combinations; mask++) {
 		let px = x;
@@ -42,7 +66,18 @@ function forEachMirroredPoint(
 			}
 		}
 
-		if (px >= 0 && px < width && py >= 0 && py < height) write(px, py);
+		if (px < 0 || px >= width || py < 0 || py >= height) continue;
+		write(px, py);
+
+		if (!radial) continue;
+		// Rotate the pixel center so odd-sized and offset centers stay stable.
+		const dx = px + 0.5 - radial.centerX;
+		const dy = py + 0.5 - radial.centerY;
+		for (const rotation of rotations) {
+			const rx = Math.floor(radial.centerX + dx * rotation.cos - dy * rotation.sin);
+			const ry = Math.floor(radial.centerY + dx * rotation.sin + dy * rotation.cos);
+			if (rx >= 0 && rx < width && ry >= 0 && ry < height) write(rx, ry);
+		}
 	}
 }
 
@@ -55,6 +90,7 @@ export function paintPixel(
 	y: number,
 	color: number,
 	mirrors: readonly MirrorAxis[] = [],
+	radial: RadialSymmetry | null = null,
 	clip: Uint8Array | null = null,
 	lockAlpha = false,
 ): void {
@@ -66,7 +102,7 @@ export function paintPixel(
 		cel[index] = color;
 	};
 
-	forEachMirroredPoint(x, y, width, height, mirrors, set);
+	forEachSymmetryPoint(x, y, width, height, mirrors, radial, set);
 }
 
 /** Stamps a square brush of `size` pixels, honoring symmetry. */
@@ -79,6 +115,7 @@ export function paintBrush(
 	size: number,
 	color: number,
 	mirrors: readonly MirrorAxis[] = [],
+	radial: RadialSymmetry | null = null,
 	clip: Uint8Array | null = null,
 	lockAlpha = false,
 ): void {
@@ -94,12 +131,13 @@ export function paintBrush(
 
 	for (let dy = 0; dy < span; dy++) {
 		for (let dx = 0; dx < span; dx++) {
-			forEachMirroredPoint(
+			forEachSymmetryPoint(
 				x - offset + dx,
 				y - offset + dy,
 				width,
 				height,
 				mirrors,
+				radial,
 				set,
 			);
 		}
@@ -818,6 +856,7 @@ export function sprayPixels(
 	count: number,
 	color: number,
 	mirrors: readonly MirrorAxis[] = [],
+	radial: RadialSymmetry | null = null,
 	clip: Uint8Array | null = null,
 	lockAlpha = false,
 ): boolean {
@@ -840,7 +879,7 @@ export function sprayPixels(
 		const distance = Math.sqrt(Math.random()) * span;
 		const x = Math.round(centerX + Math.cos(angle) * distance);
 		const y = Math.round(centerY + Math.sin(angle) * distance);
-		forEachMirroredPoint(x, y, width, height, mirrors, set);
+		forEachSymmetryPoint(x, y, width, height, mirrors, radial, set);
 	}
 
 	return changed;

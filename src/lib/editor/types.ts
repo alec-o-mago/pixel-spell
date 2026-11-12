@@ -40,6 +40,15 @@ export interface MirrorAxis {
 	position: number;
 }
 
+/** Rotational symmetry that duplicates each painted point around a center. */
+export interface RadialSymmetry {
+	/** Number of rotational copies, including the original point (2–16). */
+	count: number;
+	/** Rotation origin in document pixel coordinates. */
+	centerX: number;
+	centerY: number;
+}
+
 export interface Frame {
 	id: string;
 }

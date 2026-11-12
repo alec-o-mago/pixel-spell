@@ -37,6 +37,7 @@
 		MirrorAxis,
 		MirrorKind,
 		Point,
+		RadialSymmetry,
 		ReferenceImage,
 	} from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
@@ -81,6 +82,8 @@
 	let strokeColor = 0;
 	/** Mirror axes captured on pointer down; avoids rebuilding the array per pixel. */
 	let strokeMirrors: readonly MirrorAxis[] = [];
+	/** Radial symmetry captured on pointer down, or null when it is off. */
+	let strokeRadial: RadialSymmetry | null = null;
 	let gradientStartColor = 0;
 	let gradientEndColor = 0;
 	let gradientHistoryPushed = false;
@@ -128,6 +131,8 @@
 	let hoveringSelection = $state(false);
 	let hoveringMirror = $state<MirrorKind | null>(null);
 	let draggingMirror = $state<MirrorKind | null>(null);
+	let hoveringRadialCenter = $state(false);
+	let draggingRadialCenter = $state(false);
 	let hoveringReference = $state(false);
 	let draggingReference = $state<{
 		id: string;
@@ -168,6 +173,8 @@
 		!panning &&
 			!draggingMirror &&
 			!hoveringMirror &&
+			!draggingRadialCenter &&
+			!hoveringRadialCenter &&
 			!draggingReference &&
 			!hoveringReference &&
 			editor.tool !== "pan" &&
@@ -180,27 +187,31 @@
 			? "cursor-grabbing"
 			: hoveringReference
 				? "cursor-move"
-				: draggingMirror
-					? mirrorCursor(draggingMirror)
-					: hoveringMirror
-						? mirrorCursor(hoveringMirror)
-						: panning
-							? "cursor-grabbing"
-							: editor.tool === "pan"
-								? "cursor-grab"
-								: editor.tool === "zoom"
-									? "cursor-zoom-in"
-									: isSelectionTool(editor.tool)
-										? hoveringSelection
-											? "cursor-move"
-											: "cursor-crosshair"
-										: editor.tool === "eyedropper"
-											? "cursor-copy"
-											: !isDrawable
-												? "cursor-not-allowed"
-												: editor.tool === "fill"
-													? "cursor-cell"
-													: "cursor-crosshair",
+				: draggingRadialCenter
+					? "cursor-grabbing"
+					: hoveringRadialCenter
+						? "cursor-grab"
+						: draggingMirror
+							? mirrorCursor(draggingMirror)
+							: hoveringMirror
+								? mirrorCursor(hoveringMirror)
+								: panning
+									? "cursor-grabbing"
+									: editor.tool === "pan"
+										? "cursor-grab"
+										: editor.tool === "zoom"
+											? "cursor-zoom-in"
+											: isSelectionTool(editor.tool)
+												? hoveringSelection
+													? "cursor-move"
+													: "cursor-crosshair"
+												: editor.tool === "eyedropper"
+													? "cursor-copy"
+													: !isDrawable
+														? "cursor-not-allowed"
+														: editor.tool === "fill"
+															? "cursor-cell"
+															: "cursor-crosshair",
 	);
 
 	let stageCursor = $derived(
@@ -208,15 +219,19 @@
 			? "cursor-grabbing"
 			: hoveringReference
 				? "cursor-move"
-				: draggingMirror
-					? mirrorCursor(draggingMirror)
-					: hoveringMirror
-						? mirrorCursor(hoveringMirror)
-						: panning
-							? "cursor-grabbing"
-							: editor.tool === "pan"
-								? "cursor-grab"
-								: "",
+				: draggingRadialCenter
+					? "cursor-grabbing"
+					: hoveringRadialCenter
+						? "cursor-grab"
+						: draggingMirror
+							? mirrorCursor(draggingMirror)
+							: hoveringMirror
+								? mirrorCursor(hoveringMirror)
+								: panning
+									? "cursor-grabbing"
+									: editor.tool === "pan"
+										? "cursor-grab"
+										: "",
 	);
 
 	$effect(() => {
@@ -295,10 +310,11 @@
 		editor.panY;
 		editor.rotation;
 		const axes = editor.mirrorAxes;
+		const radial = editor.radialSymmetry;
 		zoom;
 		canvasWidth;
 		canvasHeight;
-		if (axes.length === 0 && !mirrorCanvasHasContent) return;
+		if (axes.length === 0 && !radial && !mirrorCanvasHasContent) return;
 		const id = requestAnimationFrame(drawMirrorOverlay);
 		return () => cancelAnimationFrame(id);
 	});
@@ -505,6 +521,24 @@
 		return "cursor-nwse-resize";
 	}
 
+	function radialCenterAtEvent(event: PointerEvent): boolean {
+		const radial = editor.radialSymmetry;
+		if (!radial) return false;
+		const local = pointerToLocalCanvas(event);
+		const scale = editor.effectiveZoom;
+		if (!local || scale <= 0) return false;
+		const dx = local.x - radial.centerX * scale;
+		const dy = local.y - radial.centerY * scale;
+		return dx * dx + dy * dy <= 8 * 8;
+	}
+
+	function updateRadialCenterDrag(event: PointerEvent): void {
+		const point = documentPointFromEvent(event);
+		if (!point) return;
+		const snap = (value: number) => Math.round(value * 2) / 2;
+		editor.setRadialCenter(snap(point.x), snap(point.y));
+	}
+
 	function mirrorAtEvent(event: PointerEvent): MirrorAxis | null {
 		if (
 			!editor.mirrorX &&
@@ -582,6 +616,7 @@
 			editor.brushSize,
 			color,
 			strokeMirrors,
+			strokeRadial,
 			editor.selection,
 			editor.lockAlpha,
 		);
@@ -598,6 +633,7 @@
 			count,
 			strokeColor,
 			strokeMirrors,
+			strokeRadial,
 			editor.selection,
 			editor.lockAlpha,
 		);
@@ -681,6 +717,7 @@
 				editor.brushSize,
 				color,
 				strokeMirrors,
+				strokeRadial,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -693,6 +730,7 @@
 				y,
 				color,
 				strokeMirrors,
+				strokeRadial,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -757,6 +795,7 @@
 				editor.brushSize,
 				strokeColor,
 				strokeMirrors,
+				strokeRadial,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -864,6 +903,7 @@
 				editor.brushSize,
 				color,
 				strokeMirrors,
+				strokeRadial,
 				editor.selection,
 				editor.lockAlpha,
 			);
@@ -1332,13 +1372,14 @@
 		context.restore();
 	}
 
-	/** Draw mirror guides across the whole stage, not just over the sprite. */
+	/** Draw mirror and radial guides across the whole stage, not just over the sprite. */
 	function drawMirrorOverlay(): void {
 		if (!mirrorCanvas || !stage) return;
 		const axes = editor.mirrorAxes;
-		// The common case (no mirror guides) must not touch the full-stage
-		// canvas while panning or zooming.
-		if (axes.length === 0 && !mirrorCanvasHasContent) return;
+		const radial = editor.radialSymmetry;
+		// The common case (no guides) must not touch the full-stage canvas
+		// while panning or zooming.
+		if (axes.length === 0 && !radial && !mirrorCanvasHasContent) return;
 
 		const width = Math.max(1, Math.round(stageRect.width));
 		const height = Math.max(1, Math.round(stageRect.height));
@@ -1355,7 +1396,7 @@
 		const context = mirrorCanvas.getContext("2d");
 		if (!context) return;
 
-		if (axes.length === 0) {
+		if (axes.length === 0 && !radial) {
 			context.setTransform(1, 0, 0, 1, 0, 0);
 			context.clearRect(0, 0, bufferWidth, bufferHeight);
 			mirrorCanvasHasContent = false;
@@ -1393,11 +1434,39 @@
 			}
 		}
 
+		let radialX = 0;
+		let radialY = 0;
+		if (radial) {
+			radialX = radial.centerX * scale;
+			radialY = radial.centerY * scale;
+			// A line through the center covers both opposite spokes, so even
+			// counts only need half as many drawn lines.
+			const lineCount = radial.count % 2 === 0 ? radial.count / 2 : radial.count;
+			for (let index = 0; index < lineCount; index++) {
+				const angle = (Math.PI * 2 * index) / radial.count;
+				const dx = Math.cos(angle) * span;
+				const dy = Math.sin(angle) * span;
+				context.moveTo(radialX - dx, radialY - dy);
+				context.lineTo(radialX + dx, radialY + dy);
+			}
+		}
+
 		context.lineWidth = 1.5;
 		context.setLineDash([6, 4]);
 		context.strokeStyle = "rgba(14, 165, 233, 0.95)";
 		context.stroke();
 		context.setLineDash([]);
+
+		if (radial) {
+			context.beginPath();
+			context.arc(radialX, radialY, 4, 0, Math.PI * 2);
+			context.fillStyle = "rgba(14, 165, 233, 0.95)";
+			context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+			context.lineWidth = 2;
+			context.fill();
+			context.stroke();
+		}
+
 		mirrorCanvasHasContent = true;
 	}
 
@@ -1408,6 +1477,7 @@
 		if (event.button === 1) {
 			event.preventDefault();
 			hoveringMirror = null;
+			hoveringRadialCenter = false;
 			hoveringReference = false;
 			if (!drawing && !movingSelection && !selecting && !lassoDragging) {
 				startPan(event);
@@ -1422,6 +1492,14 @@
 				return;
 			}
 
+			if (radialCenterAtEvent(event)) {
+				event.preventDefault();
+				draggingRadialCenter = true;
+				hoveringRadialCenter = true;
+				capturePointer(event);
+				return;
+			}
+
 			const mirror = mirrorAtEvent(event);
 			if (mirror) {
 				event.preventDefault();
@@ -1432,6 +1510,7 @@
 		}
 
 		hoveringMirror = null;
+		hoveringRadialCenter = false;
 
 		if (tool === "pan") {
 			if (event.button !== 0) return;
@@ -1531,6 +1610,7 @@
 				if (editor.selection && !isPointSelected(point)) return;
 				strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 				strokeMirrors = editor.mirrorAxes;
+				strokeRadial = editor.radialSymmetry;
 				curveStart = point;
 				curveEnd = point;
 				curveControl1 = point;
@@ -1555,6 +1635,7 @@
 		if (editor.selection && !isPointSelected(point)) return;
 		strokeColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 		strokeMirrors = editor.mirrorAxes;
+		strokeRadial = editor.radialSymmetry;
 		gradientStartColor = secondary ? editor.secondaryCurrentColor : editor.currentColor;
 		gradientEndColor = secondary ? editor.currentColor : editor.secondaryCurrentColor;
 
@@ -1622,6 +1703,11 @@
 			return;
 		}
 
+		if (draggingRadialCenter) {
+			updateRadialCenterDrag(event);
+			return;
+		}
+
 		if (draggingMirror) {
 			updateMirrorDrag(event);
 			return;
@@ -1629,6 +1715,7 @@
 
 		if (!panning && !movingSelection && !selecting && !lassoDragging && !drawing) {
 			hoveringReference = referenceAtEvent(event) !== null;
+			hoveringRadialCenter = radialCenterAtEvent(event);
 			hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
 		}
 
@@ -1748,6 +1835,12 @@
 			return;
 		}
 
+		if (draggingRadialCenter) {
+			draggingRadialCenter = false;
+			releasePointer(event);
+			return;
+		}
+
 		if (draggingMirror) {
 			draggingMirror = null;
 			releasePointer(event);
@@ -1816,6 +1909,7 @@
 			strokePixelPerfect = false;
 			gradientHistoryPushed = false;
 			strokeMirrors = [];
+			strokeRadial = null;
 			if (commit) editor.touch();
 		}
 		releasePointer(event);
@@ -1827,6 +1921,7 @@
 		setCursor(null);
 		hoveringSelection = false;
 		hoveringMirror = null;
+		hoveringRadialCenter = false;
 		hoveringReference = false;
 		if (editor.tool === "lasso") lassoHover = null;
 	}
@@ -1838,6 +1933,14 @@
 		const reference = referenceAtEvent(event);
 		if (reference) {
 			beginReferenceDrag(event, reference, stage);
+			return;
+		}
+
+		if (radialCenterAtEvent(event)) {
+			event.preventDefault();
+			draggingRadialCenter = true;
+			hoveringRadialCenter = true;
+			capturePointer(event, stage);
 			return;
 		}
 
@@ -1860,6 +1963,11 @@
 			return;
 		}
 
+		if (draggingRadialCenter) {
+			updateRadialCenterDrag(event);
+			return;
+		}
+
 		if (draggingMirror) {
 			updateMirrorDrag(event);
 			return;
@@ -1867,6 +1975,7 @@
 
 		if (panning || movingSelection || selecting || lassoDragging || drawing) return;
 		hoveringReference = referenceAtEvent(event) !== null;
+		hoveringRadialCenter = radialCenterAtEvent(event);
 		hoveringMirror = mirrorAtEvent(event)?.kind ?? null;
 	}
 
@@ -1876,15 +1985,21 @@
 			finishReferenceDrag(event, stage);
 			return;
 		}
+		if (draggingRadialCenter) {
+			draggingRadialCenter = false;
+			releasePointer(event, stage);
+			return;
+		}
 		if (!draggingMirror) return;
 		draggingMirror = null;
 		releasePointer(event, stage);
 	}
 
 	function handleStagePointerLeave(): void {
-		if (draggingReference || draggingMirror) return;
+		if (draggingReference || draggingMirror || draggingRadialCenter) return;
 		hoveringReference = false;
 		hoveringMirror = null;
+		hoveringRadialCenter = false;
 	}
 
 	function handleWindowKeydown(event: KeyboardEvent): void {
