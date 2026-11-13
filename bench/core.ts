@@ -286,6 +286,25 @@ function assertProjectRoundtrip(doc: PixelDoc, label: string): void {
 	if (parsed.doc.references.length !== doc.references.length) {
 		throw new Error(`${label}: reference count changed`);
 	}
+	if (parsed.doc.frames.length !== doc.frames.length) {
+		throw new Error(`${label}: frame count changed`);
+	}
+	for (let index = 0; index < doc.frames.length; index++) {
+		const original = doc.frames[index]!;
+		const restored = parsed.doc.frames[index]!;
+		if ((original.duration ?? null) !== (restored.duration ?? null)) {
+			throw new Error(`${label}: frame duration changed`);
+		}
+		if ((original.tag ?? "") !== (restored.tag ?? "")) {
+			throw new Error(`${label}: frame tag changed`);
+		}
+	}
+	if (
+		(doc.loopStart ?? null) !== (parsed.doc.loopStart ?? null) ||
+		(doc.loopEnd ?? null) !== (parsed.doc.loopEnd ?? null)
+	) {
+		throw new Error(`${label}: loop range changed`);
+	}
 	for (let layerIndex = 0; layerIndex < doc.layers.length; layerIndex++) {
 		const originalLayer = doc.layers[layerIndex]!;
 		const restoredLayer = parsed.doc.layers[layerIndex]!;
@@ -359,6 +378,16 @@ referenceDoc.references.push({
 	locked: false,
 });
 assertProjectRoundtrip(referenceDoc, "reference board");
+
+const timingDoc = makeDoc(32, 32, 2, 4, 44);
+timingDoc.frames[0]!.duration = 250;
+timingDoc.frames[1]!.tag = "walk";
+timingDoc.frames[2]!.tag = "walk";
+timingDoc.frames[3]!.duration = 40;
+timingDoc.frames[3]!.tag = "run";
+timingDoc.loopStart = 1;
+timingDoc.loopEnd = 2;
+assertProjectRoundtrip(timingDoc, "frame metadata");
 
 // --- GIF export -----------------------------------------------------------
 const gifDoc = makeDoc(128, 128, 3, 12, 31);

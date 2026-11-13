@@ -11,7 +11,17 @@
 	import { cn } from "$lib/utils.js";
 	import CelThumb from "./CelThumb.svelte";
 
-	let { layer }: { layer: Layer } = $props();
+	let {
+		layer,
+		onFrameContextMenu,
+	}: {
+		layer: Layer;
+		onFrameContextMenu: (
+			event: MouseEvent,
+			frameIndex: number,
+			layerId: string,
+		) => void;
+	} = $props();
 
 	let isReference = $derived(layer.role === "reference");
 	let editing = $state(false);
@@ -142,11 +152,13 @@
 		{@const activeRow = layer.id === editor.activeLayerId}
 		{@const activeFrame = index === editor.activeFrame}
 		{@const activeCel = activeRow && activeFrame}
+		{@const selectedFrame = editor.isFrameSelected(index)}
 
 		<td
 			class={cn(
 				"h-12 w-14 min-w-14 border-b border-r p-1 text-center align-middle",
 				(activeRow || activeFrame) && "bg-accent/40",
+				selectedFrame && !activeFrame && "bg-primary/10",
 				activeCel && "bg-accent/60",
 			)}
 		>
@@ -156,15 +168,33 @@
 					"checkerboard relative inline-block size-10 overflow-hidden rounded-md border transition-all",
 					activeCel
 						? "border-primary ring-2 ring-primary/40"
-						: "border-border/60 hover:border-muted-foreground/40",
+						: selectedFrame
+							? "border-primary/50"
+							: "border-border/60 hover:border-muted-foreground/40",
 				)}
-				onclick={() => {
+				onclick={(event) => {
 					editor.selectLayer(layer.id);
-					editor.selectFrame(index);
+					if (event.shiftKey) {
+						editor.selectFrame(index, { extend: true });
+					} else if (event.ctrlKey || event.metaKey) {
+						editor.toggleFrameSelection(index);
+					} else {
+						editor.selectFrame(index);
+					}
+				}}
+				oncontextmenu={(event) => {
+					event.preventDefault();
+					editor.selectLayer(layer.id);
+					if (editor.isFrameSelected(index)) {
+						editor.selectFrame(index, { preserveSelection: true });
+					} else {
+						editor.selectFrame(index);
+					}
+					onFrameContextMenu(event, index, layer.id);
 				}}
 				aria-label={`${layer.name}, frame ${index + 1}`}
 				aria-pressed={activeCel}
-				title={`${layer.name} · frame ${index + 1}`}
+				title={`${layer.name} · frame ${index + 1}${frame.tag ? ` · ${frame.tag}` : ""} · ${Math.round(editor.frameDurationAt(index))} ms`}
 			>
 				<CelThumb {layer} frame={index} />
 			</button>

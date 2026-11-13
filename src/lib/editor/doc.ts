@@ -59,13 +59,56 @@ export function createDoc(
 	};
 }
 
+/** Custom per-frame duration bounds, in milliseconds. */
+export const MIN_FRAME_DURATION = 10;
+export const MAX_FRAME_DURATION = 10_000;
+
+export interface FrameRange {
+	start: number;
+	end: number;
+}
+
+/** Resolves a frame's display duration, falling back to the document fps. */
+export function frameDurationMs(doc: PixelDoc, frameIndex: number): number {
+	const frame = doc.frames[frameIndex];
+	if (frame && frame.duration !== undefined && Number.isFinite(frame.duration)) {
+		return Math.max(
+			MIN_FRAME_DURATION,
+			Math.min(MAX_FRAME_DURATION, frame.duration),
+		);
+	}
+	const fps = Math.max(1, Math.min(60, doc.fps || 12));
+	return 1000 / fps;
+}
+
+/** Clamped, always-valid loop range for the document. */
+export function loopRangeOf(doc: PixelDoc): FrameRange {
+	const last = Math.max(0, doc.frames.length - 1);
+	let start = Number.isFinite(doc.loopStart) ? Math.round(doc.loopStart!) : 0;
+	let end = Number.isFinite(doc.loopEnd) ? Math.round(doc.loopEnd!) : last;
+	start = Math.max(0, Math.min(last, start));
+	end = Math.max(0, Math.min(last, end));
+	if (start > end) [start, end] = [end, start];
+	return { start, end };
+}
+
+/** True when a loop range narrower than the full animation is set. */
+export function hasCustomLoopRange(doc: PixelDoc): boolean {
+	const { start, end } = loopRangeOf(doc);
+	return start > 0 || end < doc.frames.length - 1;
+}
+
 /** Deep-clones a document into plain (non-reactive) objects. */
 export function cloneDoc(doc: PixelDoc): PixelDoc {
 	return {
 		width: doc.width,
 		height: doc.height,
 		fps: doc.fps,
-		frames: doc.frames.map((frame) => ({ id: frame.id })),
+		frames: doc.frames.map((frame) => ({
+			id: frame.id,
+			...(frame.duration !== undefined ? { duration: frame.duration } : {}),
+			...(frame.tag ? { tag: frame.tag } : {}),
+		})),
 		layers: doc.layers.map((layer) => ({
 			id: layer.id,
 			name: layer.name,
@@ -78,6 +121,8 @@ export function cloneDoc(doc: PixelDoc): PixelDoc {
 		// Reference bytes are immutable, so history and project snapshots can
 		// share them while cloning the small transform metadata.
 		references: doc.references.map((reference) => ({ ...reference })),
+		...(doc.loopStart !== undefined ? { loopStart: doc.loopStart } : {}),
+		...(doc.loopEnd !== undefined ? { loopEnd: doc.loopEnd } : {}),
 	};
 }
 

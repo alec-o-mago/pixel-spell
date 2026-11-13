@@ -52,13 +52,15 @@ Key files:
 | `lib/editor/export.ts` | Image, sprite sheet, and GIF export encoding |
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Built-in palette, palette type, and localStorage persistence |
-| `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, Aseprite-style layer×frame table, opacity footer |
+| `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, tag ranges, frame×layer table, frame context menu, onion/loop controls, opacity footer |
 | `lib/components/editor/Preview.svelte` | Closed scan-eye button and 1× floating frame preview |
 | `lib/components/editor/CanvasStage.svelte` | Canvas viewport, drawing pointer handling, reference-board placement, mirror/radial guides, zoom pill |
 | `lib/components/editor/ReferenceBoardPanel.svelte` | Floating project-level reference board manager |
 | `lib/components/editor/ReferenceBoardImage.svelte` | Stage rendering for one board reference |
 | `lib/components/editor/ReferenceThumb.svelte` | Board reference thumbnail |
 | `lib/components/editor/TimelineLayerRow.svelte` | Sticky layer header and cel cells for one layer row |
+| `lib/components/editor/FramePropertiesDialog.svelte` | Per-frame duration and tag editor |
+| `lib/components/editor/DuplicateFramesDialog.svelte` | Duplicate frames with X/Y cel offsets |
 | `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
 | `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
 | `lib/components/editor/ProjectTabs.svelte` | Project tab strip, new-project button, unsaved-close dialog |
@@ -71,6 +73,10 @@ Key files:
 - Any mutation that should be undoable must record history **before** the change: `pushHistoryCel`/`pushHistoryCels` for pixel edits and `pushHistory` for structural edits. Pixel edits, layer/frame add/delete/duplicate/reorder, clear layer/frame are undoable. Selection, visibility, opacity, and renaming are not.
 - `editor.revision` is the render invalidation signal. `CanvasStage`, `Preview`, and the active `CelThumb` read it inside `$effect`.
 - `editor.structureRevision` changes only when layers/frames are added, removed, reordered, or restored by undo/redo or a project switch. `CelThumb` redraws all cells on `structureRevision` but only the active cell on `revision`.
+- `editor.layerAppearanceRevision` changes when layer visibility or opacity changes. The onion-skin effect uses it instead of `revision` so painting the active frame does not recomposite neighboring frames on every brush stamp.
+- `editor.frameSelection` holds selected frame ids and always includes the active frame except during playback. `editor.selectedFrameIndices` returns them in timeline order. Frame operations (copy, paste, duplicate, reorder, delete, duration, tag) operate on that selection.
+- `Frame.duration` is optional; missing means `1000 / doc.fps`. `doc.loopStart`/`doc.loopEnd` are optional inclusive indices. Use `frameDurationMs`, `loopRangeOf`, and `hasCustomLoopRange` from `doc.ts` instead of duplicating the fallback logic.
+- Onion skin state (`onionEnabled`, range, opacity, previous/next toggle, tints) is workspace-wide and does not touch the document, history, or dirty flag. `editor.onionSkins` returns the neighboring frame indices and hides them during playback.
 - Pixel edits use `editor.pushHistoryCel(layerId, frame)` and structural edits use `editor.pushHistory()`. Do not use `pushHistory()` for a brush stroke: it clones every layer and frame. `pushHistoryCels` records several cels at once (for example, clearing a frame).
 - `compositeFrameCached(doc, frame, revision, includeReferences)` memoizes up to eight frame variants and returns a shared read-only buffer. It defaults to excluding reference layers so export/preview paths are safe. `CanvasStage` passes `true` for the viewport; `Preview`, `ExportDialog`, and export encoders use the default. Use `compositeFrame` when a caller may need to own or mutate the buffer.
 - `render.ts` reuses a scratch canvas/ImageData and exposes `drawPixels`, `drawScaled`, and `drawThumbnail`. Do not allocate a new canvas per draw.
@@ -78,8 +84,10 @@ Key files:
 - Reference-board images live in `doc.references`, not in `doc.layers` or cels. They are rendered as separate `<img>` elements in `CanvasStage` and never enter `compositeFrame`/`compositePixel` or export. Store original compressed bytes and display bounds; image bytes are immutable and shared across history snapshots.
 - Reference-board moves, zoom, rotation, opacity, visibility, and lock changes must not call `editor.touch()` or increment `revision`; they do not change the pixel composite. Add/remove operations use `pushHistory`. The panel edits zoom as a percentage of the natural image size through `setReferenceZoom`; display width/height remain the stored document-pixel bounds.
 - `CanvasStage` coalesces sprite, overlay, and mirror draws into `requestAnimationFrame`. Keep that behavior when adding render paths.
-- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrameCached()` or a full sprite redraw.
-- Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`.
+- `CanvasStage.svelte` renders composited sprite pixels on the main canvas and selection/lasso visuals on a separate transparent overlay canvas. Keep the sprite effect limited to pixel/zoom dependencies; selection and lasso changes must not trigger `compositeFrameCached()` or a full sprite redraw. Onion skins use a third canvas below the main canvas, tinted per direction and hidden during playback.
+- Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`. Frame order changes must apply the same permutation to `doc.frames` and every layer's `cels`.
+- `Frame` also carries optional `duration` (ms) and `tag`; `PixelDoc` carries optional `loopStart`/`loopEnd`. Contiguous equal tags render as a tag range in the timeline. Keep these fields in `cloneDoc`, history, project files, and autosaves.
+- `frameSelection` and the shift-click anchor are per-project and must be included in `ProjectSnapshot`, `#syncActiveProject`, and `#activateProject`. Restored ids are filtered against the active document.
 
 ## Projects and tabs
 
@@ -156,11 +164,15 @@ When adding a tool:
 - The timeline is a single table, not separate layers/frames panels:
   - Rows are layers, displayed top-to-bottom with `[...editor.doc.layers].reverse()`.
   - Columns are animation frames, plus a trailing add-frame column and a filler column that absorbs extra width.
-  - Clicking a cel selects both its layer and frame. Clicking a frame header selects only the frame; clicking a layer name selects only the layer.
-  - The layer header exposes visibility and lock toggles next to the layer name. Locked layers block drawing through `CanvasStage`'s `isDrawable` guard. Reference layers always show a reference icon, a "Reference" subtitle, a disabled lock button, and count toward the layer limit.
-  - The header row and the layer column are sticky (`position: sticky`) inside an `overflow-auto` container. Keep `border-separate border-spacing-0` and opaque header backgrounds, or scrolled content will show through.
-  - The active frame header is `bg-primary`; the active layer row and active frame column use subtle accent backgrounds; the active cel has a primary ring.
+  - A tag row sits above the frame numbers. Contiguous frames with the same `tag` render as one `colspan` range; clicking a range selects it, and double-clicking opens frame properties.
+  - Clicking a cel selects both its layer and frame. Clicking a frame header selects only the frame; clicking a layer name selects only the layer. Shift-click extends a frame range, and Ctrl/Cmd-click toggles individual frames.
+  - Dragging frame headers reorders the selected range. The drag payload moves `doc.frames` and every layer's `cels` with the same permutation. Right-clicking a frame header or cel opens the context menu for copy/paste, duplicate, move, loop, duration/tag, and delete actions.
+  - The header row and the layer column are sticky (`position: sticky`) inside an `overflow-auto` container. Keep `border-separate border-spacing-0` and opaque header backgrounds, or scrolled content will show through. The tag row sticks at `top-0` (24 px); the frame-number row sticks at `top-6`.
+  - The active frame header is `bg-primary`; selected frames use `bg-primary/15`; the active layer row and active frame column use subtle accent backgrounds; the active cel has a primary ring. The active loop range is underlined in amber.
   - The opacity footer below the table controls the active layer. The timeline toolbar's reference-eye button imports an image directly as a reference layer applied to all frames; when a reference layer is active, it instead replaces that frame's reference cel via `setReferenceLayerImage`.
+  - The onion button and its dropdown control `onionEnabled`, previous/next visibility, range, opacity, and tint presets. The repeat dropdown sets the loop range from the selection, the active frame, or clears it.
+  - Frame durations default to `1000 / doc.fps` when `Frame.duration` is missing. `FramePropertiesDialog` and `DuplicateFramesDialog` back the right-click actions; duplicate offsets shift every cel and clip at the canvas edges.
+  - Playback uses recursive `setTimeout` with `frameDurationAt()` and `nextPlaybackFrame()` so per-frame durations and the loop range are honored. Do not replace it with a fixed `setInterval`.
 - `TimelineDock.svelte` owns the split between canvas and timeline:
   - Height is local `$state`, clamped to 180 px minimum and `window.innerHeight - 44 - 140` maximum.
   - Persisted in `localStorage` under `pixel-spell-timeline-height`.
@@ -186,7 +198,7 @@ Preserve these regions and their relative placement when making changes.
 
 ## Persistence and files
 
-- Project files use the `.pixelspell` extension and the current binary `PXSP` container (version 2). The header stores dimensions, fps, frame/layer counts, and a UTF-8 metadata block (name, palette, active frame/layer, layer flags including `role`). Each cel is stored as raw little-endian RGBA or RLE, whichever is smaller. A self-describing reference-board section follows the cels: metadata JSON plus each image's original compressed bytes.
+- Project files use the `.pixelspell` extension and the current binary `PXSP` container (version 2). The header stores dimensions, fps, frame/layer counts, and a UTF-8 metadata block (name, palette, active frame/layer, per-frame duration/tag records, loop range, layer flags including `role`). Each cel is stored as raw little-endian RGBA or RLE, whichever is smaller. A self-describing reference-board section follows the cels: metadata JSON plus each image's original compressed bytes.
 - `serializeProject` returns a `Uint8Array`; `parseProject` accepts a `Uint8Array`/`ArrayBuffer`. `readProjectFile` reads `arrayBuffer()`. Invalid files return `null` and the UI alerts the user. Opening a project does not replace the workspace palette collection.
 - Older unreleased `PXSP` versions are intentionally rejected; bump `FORMAT_VERSION` whenever the container changes. Reference-board images are limited to 64 MB each, 64 images per project, and 256 MB total.
 - Parsing enforces 1–1024 px per side, at most 1024 layers, at most 1000 frames, a 512 MB cel budget, and a 256-color palette. Duplicate layer ids are regenerated so lookups stay unambiguous. Saving throws if a project exceeds the layer/frame limits.
@@ -211,7 +223,10 @@ Preserve these regions and their relative placement when making changes.
 - The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas. Mirror toggles/positions intentionally do **not** increment `revision`; the mirror overlay effect tracks the mirror state directly. Radial symmetry shares that overlay: it stores its center as an offset from the document center, draws red spoke guides plus a draggable center handle in red, and can be combined with the axis mirrors. Disabling it resets the center. `CanvasStage` snapshots both the mirror axes and the radial settings once per stroke.
 - `CanvasStage` caches the stage bounding rect in `stageRect` (updated by its `ResizeObserver`) instead of calling `getBoundingClientRect()` for every pointer event.
 - `editor.touch()` invalidates `compositeFrameCached`; changes that do not affect pixels (pan, zoom, rotation, mirror guides) must not call it. `editor.selectLayer`/`selectFrame` also do not invalidate pixels.
-- `CelThumb` keeps `drawnStructure`/`drawnRevision`. It redraws on `structureRevision` and on `revision` only while that cell is the active layer/frame. Do not make it read `editor.revision` unconditionally; that redraws every thumbnail on every brush stamp.
+- The frame context menu is a fixed-position custom menu, not a shadcn dropdown. It closes on outside `pointerdown` and Escape. Frame actions operate on `frameSelection`, so right-clicking an unselected frame selects it first, while right-clicking a selected frame preserves the range. `App.svelte` ignores global shortcuts whose target is inside `[role="menu"]`.
+- The temporal frame clipboard (`#frameClipboard`) is separate from the pixel clipboard and is shared across project tabs. It stores one cel per layer id plus duration/tag; pasting into a project with different layer ids fills missing cels with transparent buffers.
+- GIF export uses `animationFrameIndices(doc, loopRange)`; explicit frame durations override the dialog's fallback FPS. Keep palette collection and the frame loop on the same index list or a loop-range export will build a palette from frames it never writes.
+- Onion-skin state is not part of project files or history. `CanvasStage` hides onion skins while playing and redraws them on `activeFrame`, `structureRevision`, `historyActionRevision`, `layerAppearanceRevision`, and zoom—but not on every `revision` bump.
 - The timeline table uses sticky `<th>` cells inside an `overflow-auto` container. Keep `border-separate border-spacing-0`, explicit column widths, and opaque header backgrounds; otherwise scrolling content shows through or columns shift.
 - Timeline height is a UI preference stored in `localStorage`, not part of project files.
 - Custom palettes are workspace preferences stored in `localStorage` under `pixel-spell-palettes`; the built-in palette always has id `default` and is never persisted or editable. Custom palettes are capped at 256 colors and new ones start empty.
@@ -229,7 +244,9 @@ Preserve these regions and their relative placement when making changes.
 - `npm run bench` completes without assertion failures (it also verifies project round-trips).
 - Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Import destinations work for images: project, layer, frame, reference layer, and reference board; palettes still import. Reference layers are locked and non-exported; board references are independent of frames/layers, can be moved outside the canvas, and are embedded in saved projects.
-- Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, and dirty state; closing a dirty project confirms first.
+- Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, frame selection, and dirty state; closing a dirty project confirms first.
+- Onion skinning shows previous/next frames behind the active frame, respects the range/opacity/tint controls, toggles with `O`, and stays hidden during playback.
+- Frame tags render as ranges, durations override the project FPS, loop ranges drive playback, and GIF export honors both. Frame reordering, multi-frame selection, copy/paste, duplicate-with-offset, and the right-click menu all update every layer's cels in lockstep.
 - Autosave recovery survives a reload: a dirty project is offered with a preview, Restore reopens it as an unsaved tab, and Discard removes the snapshot. Saving a project removes its autosave.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.

@@ -16,18 +16,18 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 | 2 | Radial / N-fold symmetry ✓ | 7 | 2 | 3.50 | | Implemented: rotational copies around a draggable center with a 2–16 symmetry count. Axis mirrors can be combined with radial symmetry; the red spoke guides and draggable center handle share the mirror overlay. Disabling radial symmetry resets its center. |
 | 3 | Pixel-perfect line/shape/curve modes ✓ | 7 | 2 | 3.50 | | Implemented as a per-tool option for pencil, eraser, curve, and shape outlines. Freehand and curve paths reuse the existing pixel-perfect filter; outlines use a set-based corner filter that preserves solid blocks and leaves rectangles untouched. The Line tool hides the switch because Bresenham lines already avoid redundant corner pixels. The switch lives in the tool options panel. |
 | 4 | Autosave and crash recovery ✓ | 9 | 3 | 3.00 | | Implemented: dirty project tabs are serialized with the normal project encoder into IndexedDB after drawing pauses and on a fixed interval. The next launch previews recovered tabs on a checkerboard stage and offers **Restore** or **Discard**. Saving or closing a dirty tab removes its snapshot, and restored tabs reopen as unsaved projects. |
-| 5 | Onion skinning | 9 | 3 | 3.00 | | Draw previous/next frames at low alpha on the overlay canvas, with a configurable range and tint. No file-format change. Add per-frame visibility toggles and a quick `O` shortcut. One of the most requested animation features. |
+| 5 | Onion skinning ✓ | 9 | 3 | 3.00 | | Implemented: previous/next frames render behind the active frame on a dedicated canvas with a 1–3 frame range, 15/30/50% opacity, previous/next visibility, and tint presets. Toggle with the ghost button or `O`; onion skins are hidden during playback and never exported. |
 | 6 | Project templates / presets | 6 | 2 | 3.00 | | Presets for canvas size, palette, background, starter layers, and grid. Store in `localStorage` and expose in New Project. Useful for game-jam and platform-specific workflows. |
 | 7 | Command palette + shortcut editor | 6 | 2 | 3.00 | | Searchable action list (`Ctrl+K`), plus a keybinding editor with conflict detection and persistence. Low risk, improves discoverability and accessibility. |
 | 8 | Palette tools: sort, dedupe, ramps, lock, cycling | 8 | 3 | 2.67 | | Sort by hue/lightness, remove duplicates, generate ramps between two colors, lock the active palette for indexed-style work, and preview color cycling. Builds on the existing palette collection. |
 | 9 | Sprite sheet metadata export | 8 | 3 | 2.67 | | Export JSON alongside sheets in Aseprite, TexturePacker, and Godot formats. Include frame rects, trim, pivot, and tags. No model change; high value for game developers. |
 | 10 | Dithering patterns and pattern brushes | 8 | 3 | 2.67 | | Add selectable dither masks (Bayer, checker, custom) to pencil/fill, and let a small pattern be stamped as a brush. Reuse the gradient Bayer code and selection masks. |
-| 11 | Frame reordering drag-and-drop | 8 | 3 | 2.67 | | Drag frame headers to reorder; update every layer’s `cels` array in lockstep. The table already has stable frame ids. Add multi-frame selection in the same pass. |
+| 11 | Frame reordering drag-and-drop ✓ | 8 | 3 | 2.67 | | Implemented: drag frame headers to reorder a single frame or a multi-frame range. The frame order and every layer's cels are permuted together. Right-click move-left/right and `Alt+←`/`Alt+→` provide non-drag alternatives. |
 | 12 | Color-blindness simulation and palette preview | 5 | 2 | 2.50 | | Preview deuteranopia/protanopia/tritanopia and grayscale in the canvas without changing pixels. Useful for accessibility checks and palette design. |
 | 13 | ICO / favicon export | 5 | 2 | 2.50 | | Multi-size ICO encoder on top of the existing PNG export. Small, self-contained, and useful for web/game UI artists. |
-| 14 | Frame tags, per-frame durations, loop range | 9 | 4 | 2.25 | | Extend `Frame` with duration and tag metadata, add tag ranges in the timeline, and honor them in GIF/APNG export and playback. Needed for non-uniform animation and game animation states. |
+| 14 | Frame tags, per-frame durations, loop range ✓ | 9 | 4 | 2.25 | | Implemented: `Frame` carries optional `duration` and `tag`; `PixelDoc` carries an inclusive loop range. Tag ranges render above the frame headers, custom durations override the project FPS, playback uses per-frame timers, and GIF export honors durations and can export only the loop range. |
 | 15 | Canvas resize, crop, and nearest-neighbor scale | 9 | 4 | 2.25 | | Resample every cel with nearest-neighbor, anchor the crop, and make it undoable. Add presets and “scale ×2/×3”. A basic editor capability that is currently missing. |
-| 16 | Multi-frame selection, copy/paste, and duplicate | 8 | 4 | 2.00 | | Select a frame range, copy/paste cels across layers/frames, and duplicate with offsets. Pairs naturally with frame reordering and tags. |
+| 16 | Multi-frame selection, copy/paste, and duplicate ✓ | 8 | 4 | 2.00 | | Implemented: shift-click selects a range and Ctrl/Cmd-click toggles frames. Copy/paste moves whole frames across layers, duplicate inserts copies with optional X/Y cel offsets, and the right-click menu exposes the same actions. |
 | 17 | Outline, drop shadow, and color-replace filters | 8 | 4 | 2.00 | | Selection-aware filters that operate on the active cel or all visible layers. Add a preview and an undoable apply step. High value for quick sprite cleanup. |
 | 18 | Rulers and draggable guides | 6 | 3 | 2.00 | | Horizontal/vertical guides with snapping, persisted per project. Reuse the mirror-guide overlay and pointer mapping. |
 | 19 | Split view / second zoom window | 6 | 3 | 2.00 | | A second viewport showing the same document at another zoom, or a detached 1× preview. Reuse `drawScaled` and the preview component. |
@@ -65,13 +65,13 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 ### Phase 1 — high-value quick wins (days to ~2 weeks)
 
 1. Reference image / tracing layer — done (Reference Layer + Reference Board)
-2. Onion skinning
+2. Onion skinning — done
 3. Autosave and crash recovery — done
-4. Frame tags, per-frame durations, and loop range
+4. Frame tags, per-frame durations, and loop range — done
 5. Canvas resize/crop/scale
 6. Palette tools (sort, ramps, lock)
 7. Sprite-sheet metadata export
-8. Frame reordering and multi-frame selection
+8. Frame reordering and multi-frame selection — done
 
 These add the most day-to-day value per unit of risk. Onion skinning and reference layers in particular are table stakes for animation and tracing workflows.
 

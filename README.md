@@ -13,7 +13,10 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Pixel perfect** — optional per-tool corner-pixel removal for pencil, eraser, curve, and shape-outline strokes. The switch lives in the tool options panel and only appears for tools that support it. The line tool does not expose it because Bresenham lines already avoid redundant corner pixels.
 - **Mirroring** — X, Y, and two diagonal axis mirrors. X mirrors across the horizontal axis and Y across the vertical axis. Active axes are drawn as dashed blue lines across the whole canvas stage and can be dragged from anywhere on the stage; drag a line in half-pixel steps to move its mirror axis. Turning a mirror off resets its guide to the center. The toggles live in the top bar next to the theme switch.
 - **Radial symmetry** — an asterisk button duplicates every stroke around a center point for mandalas, wheels, and ornaments. Choose 2–16 rotational copies from the adjacent chevron menu, and drag the center handle on the canvas to move the rotation origin. Radial symmetry can be combined with the axis mirrors; mirror axes stay blue while radial spokes and the center handle are red. Turning radial symmetry off resets its center to the canvas center.
-- **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder, rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps.
+- **Aseprite-style timeline** — layers are rows and frames are columns. Click any cel to select its layer and frame; sticky headers keep both axes visible while scrolling. Add, duplicate, reorder (drag frame headers), rename, hide, lock, delete, and adjust layer opacity; add, duplicate, and delete frames; play the animation at 1–60 fps. Shift-click frames or cels to select a range, Ctrl/Cmd-click to toggle individual frames, and drag a selected frame header to move the whole range.
+- **Onion skinning** — show previous and/or next frames at low opacity behind the active frame. Choose a 1–3 frame range, 15/30/50% opacity, and a previous/next tint preset. Toggle it with `O`, the ghost button, or its settings menu.
+- **Multi-frame editing** — copy, paste, and duplicate selected frame ranges. Duplicate can shift every cel by X/Y offsets. Right-click a frame header or cel for the same actions plus move left/right, frame duration and tag settings, loop range controls, and delete.
+- **Frame tags, durations, and loop range** — give frames a tag and a custom duration. Contiguous frames with the same tag appear as tag ranges above the timeline; click a range to select it. Set a loop range for playback and GIF export. Per-frame durations override the project FPS, and GIF export can honor the loop range.
 - **Reference layers** — add a locked, non-exported reference layer to the timeline from an image. Reference layers are fitted to the canvas, can be shown or hidden, have their own opacity, and keep a cel per frame for animation-focused reference work. Use the timeline's reference-eye button for a quick import, or choose **Reference Layer** in the import dialog to apply to one frame or all frames. With a reference layer selected, the same timeline button replaces the current frame's reference cel, making it easy to build a per-frame reference sequence.
 - **Reference board** — a project-level mood board for images that should not live in the layer stack. Board references are independent of frames and layers, can be moved outside the canvas, support visibility, lock, opacity, zoom, and rotation controls, and are never exported. Toggle it from **View → Show reference board** or the top-left canvas button.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
@@ -83,6 +86,8 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Save project        | `Ctrl+S`                 |
 | Play / pause        | `Space`                  |
 | Previous / next frame | `[` / `]` or `,` / `.`  |
+| Toggle onion skin   | `O`                      |
+| Move selected frames | `Alt+←` / `Alt+→`       |
 | Toggle grid         | `Shift+G`                |
 | Select all          | `Ctrl+A`                 |
 | Copy selection      | `Ctrl+C`                 |
@@ -128,9 +133,10 @@ The project tab strip lives in `components/editor/ProjectTabs.svelte`; the edito
 A document is a `PixelDoc`:
 
 - `width`, `height`, `fps`
-- `frames[]` — animation frames
+- `frames[]` — animation frames, each with an optional custom duration (milliseconds) and tag
 - `layers[]` — ordered bottom-to-top; each layer has visibility, opacity, lock state, an optional `role: "reference"`, and one `Uint32Array` cel per frame
 - `references[]` — project-level reference-board images with their source bytes, natural dimensions, display bounds, opacity, visibility, and lock state
+- `loopStart`, `loopEnd` — optional inclusive playback/export range
 
 Pixels are packed little-endian RGBA (`0xAABBGGRR`), which lets cels be written directly into `ImageData` for rendering and PNG export. Transparent pixels are `0`.
 
@@ -152,7 +158,10 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Reference layers are locked and never exported. They are fitted to the canvas and store one cel per frame, so each frame can carry its own reference. Applying a large reference to many frames increases project file size because each reference cel is saved like a normal cel.
 - Reference-board images are stored inside the project file. A large mood board therefore makes the `.pixelspell` file larger. Board image movement, opacity, zoom, and rotation changes are not part of the undo history; adding and removing a board image is.
 - Reference-board images are draggable only while selected in the board panel and unlocked. Lock them when you want to keep drawing over them without moving them.
-- The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`.
+- The timeline is an Aseprite-style grid: layer rows and frame columns, with sticky headers and cel thumbnails. Its height is remembered in `localStorage`. Frame tags appear as ranges above the frame numbers, and the active loop range is underlined in amber.
+- Onion skins are a viewport aid only; they are never included in thumbnails, previews, or exports. They are hidden during playback.
+- Per-frame durations, tag ranges, and the loop range are stored in `.pixelspell` files. Frames without a custom duration follow the project FPS.
+- GIF export uses custom frame durations and can optionally export only the loop range. The fallback frame rate applies to frames without a custom duration.
 - Custom color palettes and the active palette selection are saved in `localStorage`; the built-in palette is recreated on load and cannot be edited.
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no free-transform (scale/rotate) tool for selections yet.

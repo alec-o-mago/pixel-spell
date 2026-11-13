@@ -1,4 +1,4 @@
-import { compositeFrame } from "./doc.js";
+import { compositeFrame, frameDurationMs, loopRangeOf } from "./doc.js";
 import { fileBase } from "./file.js";
 import { drawPixels } from "./render.js";
 import type { PixelDoc } from "./types.js";
@@ -33,6 +33,8 @@ export interface GifExportOptions {
 	fps: number;
 	loop: boolean;
 	background: ExportBackground;
+	/** Restrict the GIF to the document loop range when one is set. */
+	loopRange?: boolean;
 }
 
 export interface SheetGeometry {
@@ -135,6 +137,22 @@ export function getSheetGeometry(
 		width: cols * width + Math.max(0, cols - 1) * gap,
 		height: rows * height + Math.max(0, rows - 1) * gap,
 	};
+}
+
+/** Frame indices included in an animation export. */
+export function animationFrameIndices(
+	doc: PixelDoc,
+	useLoopRange = true,
+): number[] {
+	if (!useLoopRange) {
+		return Array.from({ length: doc.frames.length }, (_, index) => index);
+	}
+	const range = loopRangeOf(doc);
+	const indices: number[] = [];
+	for (let index = range.start; index <= range.end; index++) {
+		indices.push(index);
+	}
+	return indices.length > 0 ? indices : [0];
 }
 
 /** Returns a human-readable error when an export would exceed safe limits. */
@@ -440,8 +458,8 @@ function medianCut(entries: ColorCount[], maxColors: number): ColorCount[] {
 }
 
 function collectGifColors(
-	doc: PixelDoc,
 	background: ExportBackground,
+	frameIndices: readonly number[],
 	getFrame: (frame: number) => Uint32Array,
 ): ColorCount[] {
 	let exact: Map<number, number> | null = new Map();
@@ -474,7 +492,7 @@ function collectGifColors(
 		}
 	};
 
-	for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
+	for (const frameIndex of frameIndices) {
 		const pixels = getFrame(frameIndex);
 		for (let index = 0; index < pixels.length; index++) {
 			const value = pixels[index]!;
@@ -531,13 +549,13 @@ interface GifPalette {
 }
 
 function buildGifPalette(
-	doc: PixelDoc,
 	background: ExportBackground,
+	frameIndices: readonly number[],
 	getFrame: (frame: number) => Uint32Array,
 ): GifPalette {
 	const transparentIndex = background === "transparent" ? 0 : null;
 	const maxColors = transparentIndex === null ? 256 : 255;
-	const sourceColors = collectGifColors(doc, background, getFrame);
+	const sourceColors = collectGifColors(background, frameIndices, getFrame);
 	const reduced =
 		sourceColors.length <= maxColors
 			? sourceColors
@@ -796,16 +814,21 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 	const width = doc.width * scale;
 	const height = doc.height * scale;
 	const fps = clampInt(options.fps, 1, 60);
-	const delay = Math.max(2, Math.round(100 / fps));
 	const background = options.background;
-	const sizeError = validateExportSize(width, height, doc.frames.length, true);
+	const frameIndices = animationFrameIndices(doc, options.loopRange !== false);
+	const sizeError = validateExportSize(
+		width,
+		height,
+		frameIndices.length,
+		true,
+	);
 	if (sizeError) throw new Error(sizeError);
 
 	// Palette collection and index building both need every frame. Cache the
 	// composited frames when the document is small enough, avoiding a second
 	// full composite pass for typical sprites.
 	const frameCache =
-		doc.width * doc.height * doc.frames.length <= 16_000_000
+		doc.width * doc.height * frameIndices.length <= 16_000_000
 			? new Map<number, Uint32Array>()
 			: null;
 	const getFrame = (frame: number): Uint32Array => {
@@ -817,7 +840,7 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 		return pixels;
 	};
 
-	const palette = buildGifPalette(doc, background, getFrame);
+	const palette = buildGifPalette(background, frameIndices, getFrame);
 
 	const writer = new ByteWriter();
 	writer.writeString("GIF89a");
@@ -848,7 +871,16 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 	const transparentFlag = palette.transparentIndex === null ? 0 : 1;
 	const disposal = palette.transparentIndex === null ? 1 : 2;
 
-	for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
+	for (const frameIndex of frameIndices) {
+		const customDuration = doc.frames[frameIndex]?.duration;
+		const duration =
+			customDuration !== undefined
+				? frameDurationMs(doc, frameIndex)
+				: 1000 / fps;
+		const delay = Math.max(
+			2,
+			Math.min(65535, Math.round(duration / 10)),
+		);
 		writer.writeBytes([
 			0x21,
 			0xf9,

@@ -37,6 +37,8 @@
 				{ label: "Play / pause", keys: "Space" },
 				{ label: "Previous frame", keys: "[" },
 				{ label: "Next frame", keys: "]" },
+				{ label: "Toggle onion skin", keys: "O" },
+				{ label: "Move selected frames", keys: "Alt ← / →" },
 				{ label: "Toggle grid", keys: "⇧ G" },
 				{ label: "Select all", keys: "Ctrl A" },
 				{ label: "Copy selection", keys: "Ctrl C" },

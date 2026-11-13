@@ -51,6 +51,10 @@ export interface RadialSymmetry {
 
 export interface Frame {
 	id: string;
+	/** Custom display duration in milliseconds; missing uses the document fps. */
+	duration?: number;
+	/** Optional tag. Contiguous frames with the same tag form a tag range. */
+	tag?: string;
 }
 
 /** Reference layers are visible in the viewport but are never exported. */
@@ -104,6 +108,9 @@ export interface PixelDoc {
 	layers: Layer[];
 	/** Project-level reference board images. */
 	references: ReferenceImage[];
+	/** Inclusive playback/export range; missing means the whole animation. */
+	loopStart?: number;
+	loopEnd?: number;
 }
 
 export interface ProjectTab {

@@ -9,6 +9,7 @@
 	import ZoomOut from "@lucide/svelte/icons/zoom-out";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
+	import { packColor, unpackColor } from "$lib/editor/color.js";
 	import { compositeFrameCached, compositePixel } from "$lib/editor/doc.js";
 	import {
 		blurPixels,
@@ -68,6 +69,8 @@
 	let stage: HTMLDivElement | undefined;
 	let canvas: HTMLCanvasElement | undefined;
 	let overlayCanvas: HTMLCanvasElement | undefined;
+	let onionCanvas: HTMLCanvasElement | undefined;
+	let onionFrameCanvas: HTMLCanvasElement | null = null;
 	let mirrorCanvas: HTMLCanvasElement | undefined;
 	let floatingCanvas: HTMLCanvasElement | null = null;
 	let mirrorCanvasHasContent = false;
@@ -273,6 +276,94 @@
 				doc.height * currentZoom,
 			);
 		});
+		return () => cancelAnimationFrame(id);
+	});
+
+	/** Recolors an onion frame so previous and next frames stay distinguishable. */
+	function tintOnionPixels(
+		source: Uint32Array,
+		tint: string,
+		opacity: number,
+	): Uint32Array {
+		const color = unpackColor(packColor(tint));
+		const mix = 0.82;
+		const output = new Uint32Array(source.length);
+		for (let index = 0; index < source.length; index++) {
+			const value = source[index]!;
+			const alpha = value >>> 24;
+			if (alpha === 0) continue;
+			const r = value & 0xff;
+			const g = (value >>> 8) & 0xff;
+			const b = (value >>> 16) & 0xff;
+			const nr = Math.round(r + (color.r - r) * mix);
+			const ng = Math.round(g + (color.g - g) * mix);
+			const nb = Math.round(b + (color.b - b) * mix);
+			const na = Math.round(alpha * opacity);
+			output[index] = ((na << 24) | (nb << 16) | (ng << 8) | nr) >>> 0;
+		}
+		return output;
+	}
+
+	function drawOnionSkins(): void {
+		if (!onionCanvas) return;
+		const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+		const width = Math.max(1, Math.round(canvasWidth * dpr));
+		const height = Math.max(1, Math.round(canvasHeight * dpr));
+		if (onionCanvas.width !== width) onionCanvas.width = width;
+		if (onionCanvas.height !== height) onionCanvas.height = height;
+
+		const context = onionCanvas.getContext("2d");
+		if (!context) return;
+		context.setTransform(1, 0, 0, 1, 0, 0);
+		context.clearRect(0, 0, width, height);
+
+		const skins = editor.onionSkins;
+		if (skins.length === 0) return;
+
+		const doc = editor.doc;
+		if (!onionFrameCanvas) onionFrameCanvas = document.createElement("canvas");
+		if (onionFrameCanvas.width !== doc.width) {
+			onionFrameCanvas.width = doc.width;
+		}
+		if (onionFrameCanvas.height !== doc.height) {
+			onionFrameCanvas.height = doc.height;
+		}
+
+		context.imageSmoothingEnabled = false;
+		for (const skin of skins) {
+			const pixels = compositeFrameCached(
+				doc,
+				skin.frame,
+				editor.revision,
+			);
+			const tint =
+				skin.direction === "previous"
+					? editor.onionTintPrevious
+					: editor.onionTintNext;
+			const fade = Math.max(0.35, 1 - (skin.distance - 1) * 0.25);
+			drawPixels(
+				onionFrameCanvas,
+				tintOnionPixels(pixels, tint, editor.onionOpacity * fade),
+				doc.width,
+				doc.height,
+			);
+			context.drawImage(onionFrameCanvas, 0, 0, width, height);
+		}
+	}
+
+	$effect(() => {
+		// Onion skins follow the active frame, visibility and document content,
+		// but stay hidden during playback to keep the animation readable.
+		editor.onionSkins;
+		editor.doc;
+		editor.activeFrame;
+		editor.layerAppearanceRevision;
+		editor.structureRevision;
+		editor.historyActionRevision;
+		canvasWidth;
+		canvasHeight;
+		if (!onionCanvas) return;
+		const id = requestAnimationFrame(drawOnionSkins);
 		return () => cancelAnimationFrame(id);
 	});
 
@@ -2128,6 +2219,14 @@
 					/>
 				{/if}
 			{/each}
+
+			<canvas
+				bind:this={onionCanvas}
+				class="pointer-events-none absolute inset-0 block"
+				style:width={`${canvasWidth}px`}
+				style:height={`${canvasHeight}px`}
+				aria-hidden="true"
+			></canvas>
 
 			<canvas
 				bind:this={canvas}

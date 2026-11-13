@@ -1,11 +1,11 @@
 import { normalizeHex } from "./color.js";
-import { uid } from "./doc.js";
+import { MAX_FRAME_DURATION, MIN_FRAME_DURATION, uid } from "./doc.js";
 import {
 	MAX_REFERENCE_BYTES,
 	MAX_REFERENCE_COUNT,
 	MAX_TOTAL_REFERENCE_BYTES,
 } from "./reference.js";
-import type { Layer, PixelDoc, ReferenceImage } from "./types.js";
+import type { Frame, Layer, PixelDoc, ReferenceImage } from "./types.js";
 
 export interface LoadedProject {
 	doc: PixelDoc;
@@ -33,6 +33,9 @@ interface ProjectMeta {
 	palette: string[];
 	activeFrame: number;
 	activeLayerId: string;
+	frames?: { duration?: number; tag?: string }[];
+	loopStart?: number;
+	loopEnd?: number;
 	layers: {
 		id: string;
 		name: string;
@@ -223,6 +226,12 @@ export function serializeProject(
 		palette,
 		activeFrame,
 		activeLayerId,
+		frames: doc.frames.map((frame) => ({
+			...(frame.duration !== undefined ? { duration: frame.duration } : {}),
+			...(frame.tag ? { tag: frame.tag } : {}),
+		})),
+		...(doc.loopStart !== undefined ? { loopStart: doc.loopStart } : {}),
+		...(doc.loopEnd !== undefined ? { loopEnd: doc.loopEnd } : {}),
 		layers: doc.layers.map((layer) => ({
 			id: layer.id,
 			name: layer.name,
@@ -568,14 +577,48 @@ function parseProjectBinary(bytes: Uint8Array): LoadedProject | null {
 			? meta.activeLayerId
 			: layers[0]!.id;
 
+	const rawFrames = Array.isArray(meta.frames) ? meta.frames : [];
+	const frames: Frame[] = Array.from({ length: frameCount }, (_, index) => {
+		const frame: Frame = { id: uid("frame") };
+		const raw = rawFrames[index];
+		if (raw && typeof raw === "object") {
+			const duration = Number(raw.duration);
+			if (Number.isFinite(duration)) {
+				frame.duration = clamp(
+					Math.round(duration),
+					MIN_FRAME_DURATION,
+					MAX_FRAME_DURATION,
+				);
+			}
+			if (typeof raw.tag === "string") {
+				const tag = raw.tag.trim().slice(0, 40);
+				if (tag) frame.tag = tag;
+			}
+		}
+		return frame;
+	});
+
+	const rawLoopStart = Number(meta.loopStart);
+	const rawLoopEnd = Number(meta.loopEnd);
+	let loopStart: number | undefined;
+	let loopEnd: number | undefined;
+	if (Number.isFinite(rawLoopStart) && Number.isFinite(rawLoopEnd)) {
+		const start = clamp(Math.round(rawLoopStart), 0, frameCount - 1);
+		const end = clamp(Math.round(rawLoopEnd), 0, frameCount - 1);
+		loopStart = Math.min(start, end);
+		loopEnd = Math.max(start, end);
+	}
+
 	return {
 		doc: {
 			width,
 			height,
 			fps,
-			frames: Array.from({ length: frameCount }, () => ({ id: uid("frame") })),
+			frames,
 			layers,
 			references,
+			...(loopStart !== undefined ? { loopStart } : {}),
+			...(loopEnd !== undefined ? { loopEnd } : {}),
 		},
 		palette: normalizePalette(meta.palette),
 		activeFrame,

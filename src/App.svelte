@@ -212,7 +212,12 @@
 			return;
 		}
 		// A dialog owns its own keyboard interactions.
-		if (element instanceof Element && element.closest('[role="dialog"]')) return;
+		if (
+			element instanceof Element &&
+			element.closest('[role="dialog"], [role="menu"]')
+		) {
+			return;
+		}
 
 		const modifier = event.ctrlKey || event.metaKey;
 		const key = event.key.toLowerCase();
@@ -257,11 +262,28 @@
 			return;
 		}
 
-		if (event.altKey) return;
+		if (event.altKey) {
+			if (event.key === "ArrowLeft") {
+				event.preventDefault();
+				editor.moveSelectedFrames(-1);
+				return;
+			}
+			if (event.key === "ArrowRight") {
+				event.preventDefault();
+				editor.moveSelectedFrames(1);
+				return;
+			}
+			return;
+		}
 
 		if (event.key === "Delete") {
 			event.preventDefault();
 			editor.deleteSelection();
+			return;
+		}
+
+		if (key === "o") {
+			editor.toggleOnion();
 			return;
 		}
 
