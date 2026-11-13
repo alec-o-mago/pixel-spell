@@ -3,6 +3,7 @@
 	import EyeOff from "@lucide/svelte/icons/eye-off";
 	import Lock from "@lucide/svelte/icons/lock";
 	import LockOpen from "@lucide/svelte/icons/lock-open";
+	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import { tick } from "svelte";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
@@ -10,8 +11,19 @@
 	import { cn } from "$lib/utils.js";
 	import CelThumb from "./CelThumb.svelte";
 
-	let { layer }: { layer: Layer } = $props();
+	let {
+		layer,
+		onFrameContextMenu,
+	}: {
+		layer: Layer;
+		onFrameContextMenu: (
+			event: MouseEvent,
+			frameIndex: number,
+			layerId: string,
+		) => void;
+	} = $props();
 
+	let isReference = $derived(layer.role === "reference");
 	let editing = $state(false);
 	let draft = $state("");
 	let input = $state<HTMLInputElement | null>(null);
@@ -70,9 +82,18 @@
 					"size-7 shrink-0",
 					layer.locked ? "text-foreground" : "text-muted-foreground",
 				)}
-				title={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
-				aria-label={layer.locked ? `Unlock ${layer.name}` : `Lock ${layer.name}`}
+				title={isReference
+					? "Reference layers are always locked"
+					: layer.locked
+						? `Unlock ${layer.name}`
+						: `Lock ${layer.name}`}
+				aria-label={isReference
+					? "Reference layers are always locked"
+					: layer.locked
+						? `Unlock ${layer.name}`
+						: `Lock ${layer.name}`}
 				aria-pressed={layer.locked}
+				disabled={isReference}
 				onclick={() => editor.toggleLayerLock(layer.id)}
 			>
 				{#if layer.locked}
@@ -109,9 +130,17 @@
 						aria-pressed={layer.id === editor.activeLayerId}
 						title="Double-click to rename"
 					>
-						<span class="block truncate text-xs font-medium">{layer.name}</span>
+						<span class="flex min-w-0 items-center gap-1">
+							{#if isReference}
+								<ScanEye class="size-3 shrink-0 text-primary" />
+							{/if}
+							<span class="truncate text-xs font-medium">{layer.name}</span>
+						</span>
 						<span class="block truncate text-[10px] text-muted-foreground">
 							{Math.round(layer.opacity * 100)}% · {layer.visible ? "Visible" : "Hidden"}
+							{#if isReference}
+								· Reference
+							{/if}
 						</span>
 					</button>
 				{/if}
@@ -123,11 +152,13 @@
 		{@const activeRow = layer.id === editor.activeLayerId}
 		{@const activeFrame = index === editor.activeFrame}
 		{@const activeCel = activeRow && activeFrame}
+		{@const selectedFrame = editor.isFrameSelected(index)}
 
 		<td
 			class={cn(
 				"h-12 w-14 min-w-14 border-b border-r p-1 text-center align-middle",
 				(activeRow || activeFrame) && "bg-accent/40",
+				selectedFrame && !activeFrame && "bg-primary/10",
 				activeCel && "bg-accent/60",
 			)}
 		>
@@ -137,15 +168,33 @@
 					"checkerboard relative inline-block size-10 overflow-hidden rounded-md border transition-all",
 					activeCel
 						? "border-primary ring-2 ring-primary/40"
-						: "border-border/60 hover:border-muted-foreground/40",
+						: selectedFrame
+							? "border-primary/50"
+							: "border-border/60 hover:border-muted-foreground/40",
 				)}
-				onclick={() => {
+				onclick={(event) => {
 					editor.selectLayer(layer.id);
-					editor.selectFrame(index);
+					if (event.shiftKey) {
+						editor.selectFrame(index, { extend: true });
+					} else if (event.ctrlKey || event.metaKey) {
+						editor.toggleFrameSelection(index);
+					} else {
+						editor.selectFrame(index);
+					}
+				}}
+				oncontextmenu={(event) => {
+					event.preventDefault();
+					editor.selectLayer(layer.id);
+					if (editor.isFrameSelected(index)) {
+						editor.selectFrame(index, { preserveSelection: true });
+					} else {
+						editor.selectFrame(index);
+					}
+					onFrameContextMenu(event, index, layer.id);
 				}}
 				aria-label={`${layer.name}, frame ${index + 1}`}
 				aria-pressed={activeCel}
-				title={`${layer.name} · frame ${index + 1}`}
+				title={`${layer.name} · frame ${index + 1}${frame.tag ? ` · ${frame.tag}` : ""} · ${Math.round(editor.frameDurationAt(index))} ms`}
 			>
 				<CelThumb {layer} frame={index} />
 			</button>

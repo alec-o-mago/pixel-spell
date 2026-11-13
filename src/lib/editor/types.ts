@@ -40,9 +40,25 @@ export interface MirrorAxis {
 	position: number;
 }
 
+/** Rotational symmetry that duplicates each painted point around a center. */
+export interface RadialSymmetry {
+	/** Number of rotational copies, including the original point (2–16). */
+	count: number;
+	/** Rotation origin in document pixel coordinates. */
+	centerX: number;
+	centerY: number;
+}
+
 export interface Frame {
 	id: string;
+	/** Custom display duration in milliseconds; missing uses the document fps. */
+	duration?: number;
+	/** Optional tag. Contiguous frames with the same tag form a tag range. */
+	tag?: string;
 }
+
+/** Reference layers are visible in the viewport but are never exported. */
+export type LayerRole = "reference";
 
 export interface Layer {
 	id: string;
@@ -53,6 +69,34 @@ export interface Layer {
 	opacity: number;
 	/** One pixel buffer per animation frame. */
 	cels: Uint32Array[];
+	/** Missing means a normal paint layer. */
+	role?: LayerRole;
+}
+
+/**
+ * An image on the project-level reference board. Unlike a reference layer,
+ * this is independent of layers and frames and can sit outside the canvas.
+ */
+export interface ReferenceImage {
+	id: string;
+	name: string;
+	/** Original compressed source bytes (PNG/JPEG/WebP/SVG/…). */
+	bytes: Uint8Array;
+	mime: string;
+	/** Natural source dimensions. */
+	imageWidth: number;
+	imageHeight: number;
+	/** Display bounds in document pixels. */
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	/** Rotation in degrees around the image center. */
+	rotation: number;
+	/** 0..1 */
+	opacity: number;
+	visible: boolean;
+	locked: boolean;
 }
 
 export interface PixelDoc {
@@ -62,6 +106,11 @@ export interface PixelDoc {
 	frames: Frame[];
 	/** Ordered bottom-to-top. */
 	layers: Layer[];
+	/** Project-level reference board images. */
+	references: ReferenceImage[];
+	/** Inclusive playback/export range; missing means the whole animation. */
+	loopStart?: number;
+	loopEnd?: number;
 }
 
 export interface ProjectTab {

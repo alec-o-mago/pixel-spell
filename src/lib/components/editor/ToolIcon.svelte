@@ -5,11 +5,11 @@
 	import Eraser from "@lucide/svelte/icons/eraser";
 	import Hand from "@lucide/svelte/icons/hand";
 	import LassoSelect from "@lucide/svelte/icons/lasso-select";
+	import LetterS from "@lucide/svelte/icons/letter-s";
 	import PaintBucket from "@lucide/svelte/icons/paint-bucket";
 	import Pencil from "@lucide/svelte/icons/pencil";
 	import Pipette from "@lucide/svelte/icons/pipette";
 	import Slash from "@lucide/svelte/icons/slash";
-	import Spline from "@lucide/svelte/icons/spline";
 	import SprayCan from "@lucide/svelte/icons/spray-can";
 	import Square from "@lucide/svelte/icons/square";
 	import SquareDashed from "@lucide/svelte/icons/square-dashed";
@@ -42,7 +42,7 @@
 {:else if tool === "line"}
 	<Slash class={className} />
 {:else if tool === "curve"}
-	<Spline class={className} />
+	<LetterS class={className} />
 {:else if tool === "shape"}
 	<Square class={className} />
 {:else if tool === "fill"}

@@ -92,6 +92,7 @@ export function loadPaletteState(): { palettes: Palette[]; activeId: string } {
 
 		if (Array.isArray(parsed.palettes)) {
 			for (const entry of parsed.palettes) {
+				if (palettes.length >= 100) break;
 				if (!entry || typeof entry !== "object") continue;
 				const rawPalette = entry as Partial<Palette>;
 				const id =

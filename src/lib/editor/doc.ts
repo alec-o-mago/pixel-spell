@@ -1,5 +1,5 @@
 import { packColor } from "./color.js";
-import type { BackgroundKind, Layer, PixelDoc } from "./types.js";
+import type { BackgroundKind, Layer, LayerRole, PixelDoc } from "./types.js";
 
 let idCounter = 0;
 
@@ -13,15 +13,22 @@ export function createLayer(
 	width: number,
 	height: number,
 	frameCount: number,
+	role?: LayerRole,
 ): Layer {
 	return {
 		id: uid("layer"),
 		name,
 		visible: true,
-		locked: false,
+		locked: role === "reference",
 		opacity: 1,
 		cels: Array.from({ length: frameCount }, () => new Uint32Array(width * height)),
+		...(role ? { role } : {}),
 	};
+}
+
+/** True for timeline reference layers, which cannot be drawn on. */
+export function isReferenceLayer(layer: Layer): boolean {
+	return layer.role === "reference";
 }
 
 export function createDoc(
@@ -48,7 +55,47 @@ export function createDoc(
 		fps: 12,
 		frames: [{ id: uid("frame") }],
 		layers: [layer],
+		references: [],
 	};
+}
+
+/** Custom per-frame duration bounds, in milliseconds. */
+export const MIN_FRAME_DURATION = 10;
+export const MAX_FRAME_DURATION = 10_000;
+
+export interface FrameRange {
+	start: number;
+	end: number;
+}
+
+/** Resolves a frame's display duration, falling back to the document fps. */
+export function frameDurationMs(doc: PixelDoc, frameIndex: number): number {
+	const frame = doc.frames[frameIndex];
+	if (frame && frame.duration !== undefined && Number.isFinite(frame.duration)) {
+		return Math.max(
+			MIN_FRAME_DURATION,
+			Math.min(MAX_FRAME_DURATION, frame.duration),
+		);
+	}
+	const fps = Math.max(1, Math.min(60, doc.fps || 12));
+	return 1000 / fps;
+}
+
+/** Clamped, always-valid loop range for the document. */
+export function loopRangeOf(doc: PixelDoc): FrameRange {
+	const last = Math.max(0, doc.frames.length - 1);
+	let start = Number.isFinite(doc.loopStart) ? Math.round(doc.loopStart!) : 0;
+	let end = Number.isFinite(doc.loopEnd) ? Math.round(doc.loopEnd!) : last;
+	start = Math.max(0, Math.min(last, start));
+	end = Math.max(0, Math.min(last, end));
+	if (start > end) [start, end] = [end, start];
+	return { start, end };
+}
+
+/** True when a loop range narrower than the full animation is set. */
+export function hasCustomLoopRange(doc: PixelDoc): boolean {
+	const { start, end } = loopRangeOf(doc);
+	return start > 0 || end < doc.frames.length - 1;
 }
 
 /** Deep-clones a document into plain (non-reactive) objects. */
@@ -57,7 +104,11 @@ export function cloneDoc(doc: PixelDoc): PixelDoc {
 		width: doc.width,
 		height: doc.height,
 		fps: doc.fps,
-		frames: doc.frames.map((frame) => ({ id: frame.id })),
+		frames: doc.frames.map((frame) => ({
+			id: frame.id,
+			...(frame.duration !== undefined ? { duration: frame.duration } : {}),
+			...(frame.tag ? { tag: frame.tag } : {}),
+		})),
 		layers: doc.layers.map((layer) => ({
 			id: layer.id,
 			name: layer.name,
@@ -65,57 +116,177 @@ export function cloneDoc(doc: PixelDoc): PixelDoc {
 			locked: layer.locked,
 			opacity: layer.opacity,
 			cels: layer.cels.map((cel) => new Uint32Array(cel)),
+			...(layer.role ? { role: layer.role } : {}),
 		})),
+		// Reference bytes are immutable, so history and project snapshots can
+		// share them while cloning the small transform metadata.
+		references: doc.references.map((reference) => ({ ...reference })),
+		...(doc.loopStart !== undefined ? { loopStart: doc.loopStart } : {}),
+		...(doc.loopEnd !== undefined ? { loopEnd: doc.loopEnd } : {}),
 	};
+}
+
+/**
+ * 256×256 lookup for `sourceAlpha * layerOpacity / 255`. Index is
+ * `(sourceAlpha << 8) | opacityByte`. Keeps the compositing inner loop free of
+ * floating point multiplication for the common opaque case.
+ */
+const ALPHA_PRODUCT = new Uint8Array(256 * 256);
+for (let alpha = 0; alpha < 256; alpha++) {
+	for (let opacity = 0; opacity < 256; opacity++) {
+		ALPHA_PRODUCT[(alpha << 8) | opacity] = Math.round((alpha * opacity) / 255);
+	}
+}
+
+/** Full alpha blend for the uncommon partially transparent case. */
+function blendPixelSlow(
+	source: number,
+	destination: number,
+	sa: number,
+): number {
+	const saF = sa / 255;
+	const daF = (destination >>> 24) / 255;
+	const oaF = saF + daF * (1 - saF);
+	if (oaF <= 0) return destination;
+
+	const inverse = 1 / oaF;
+	const sr = source & 0xff;
+	const sg = (source >>> 8) & 0xff;
+	const sb = (source >>> 16) & 0xff;
+	const dr = destination & 0xff;
+	const dg = (destination >>> 8) & 0xff;
+	const db = (destination >>> 16) & 0xff;
+
+	const r = ((sr * saF + dr * daF * (1 - saF)) * inverse + 0.5) | 0;
+	const g = ((sg * saF + dg * daF * (1 - saF)) * inverse + 0.5) | 0;
+	const b = ((sb * saF + db * daF * (1 - saF)) * inverse + 0.5) | 0;
+	const a = (oaF * 255 + 0.5) | 0;
+
+	return (((a & 0xff) << 24) | (b << 16) | (g << 8) | r) >>> 0;
 }
 
 /**
  * Flattens every visible layer of a frame into a single RGBA pixel buffer.
  * The buffer uses the same packed little-endian format as layer cels.
+ *
+ * Reference layers are excluded by default so every export path is safe.
+ * Pass `includeReferences` for viewport rendering only.
  */
-export function compositeFrame(doc: PixelDoc, frameIndex: number): Uint32Array {
+export function compositeFrame(
+	doc: PixelDoc,
+	frameIndex: number,
+	includeReferences = false,
+): Uint32Array {
 	const count = doc.width * doc.height;
 	const output = new Uint32Array(count);
+
+	for (const layer of doc.layers) {
+		if (!includeReferences && layer.role === "reference") continue;
+		if (!layer.visible || layer.opacity <= 0) continue;
+		const cel = layer.cels[frameIndex];
+		if (!cel) continue;
+		const opacityByte = Math.max(
+			0,
+			Math.min(255, Math.round(layer.opacity * 255)),
+		);
+
+		for (let index = 0; index < count; index++) {
+			const source = cel[index]!;
+			const sourceAlpha = source >>> 24;
+			if (sourceAlpha === 0) continue;
+			const sa = ALPHA_PRODUCT[(sourceAlpha << 8) | opacityByte]!;
+			if (sa === 0) continue;
+
+			const destination = output[index]!;
+			const destinationAlpha = destination >>> 24;
+			if (destinationAlpha === 0) {
+				output[index] = ((sa << 24) | (source & 0x00ffffff)) >>> 0;
+				continue;
+			}
+			if (sa === 255) {
+				output[index] = (0xff000000 | (source & 0x00ffffff)) >>> 0;
+				continue;
+			}
+			output[index] = blendPixelSlow(source, destination, sa);
+		}
+	}
+
+	return output;
+}
+
+/** Composites a single pixel; used by the eyedropper instead of a full frame. */
+export function compositePixel(
+	doc: PixelDoc,
+	frameIndex: number,
+	x: number,
+	y: number,
+): number {
+	if (x < 0 || x >= doc.width || y < 0 || y >= doc.height) return 0;
+	const index = y * doc.width + x;
+	let output = 0;
 
 	for (const layer of doc.layers) {
 		if (!layer.visible || layer.opacity <= 0) continue;
 		const cel = layer.cels[frameIndex];
 		if (!cel) continue;
-		const opacity = layer.opacity;
-
-		for (let i = 0; i < count; i++) {
-			const src = cel[i];
-			const srcAlpha = (src >>> 24) / 255;
-			if (srcAlpha === 0) continue;
-
-			const sa = srcAlpha * opacity;
-			const dst = output[i];
-			const da = (dst >>> 24) / 255;
-			const oa = sa + da * (1 - sa);
-			if (oa <= 0) continue;
-
-			const sr = src & 0xff;
-			const sg = (src >>> 8) & 0xff;
-			const sb = (src >>> 16) & 0xff;
-
-			if (da === 0) {
-				output[i] =
-					(((Math.round(sa * 255) & 0xff) << 24) | (sb << 16) | (sg << 8) | sr) >>> 0;
-				continue;
-			}
-
-			const dr = dst & 0xff;
-			const dg = (dst >>> 8) & 0xff;
-			const db = (dst >>> 16) & 0xff;
-
-			const r = Math.round((sr * sa + dr * da * (1 - sa)) / oa);
-			const g = Math.round((sg * sa + dg * da * (1 - sa)) / oa);
-			const b = Math.round((sb * sa + db * da * (1 - sa)) / oa);
-
-			output[i] =
-				(((Math.round(oa * 255) & 0xff) << 24) | (b << 16) | (g << 8) | r) >>> 0;
+		const source = cel[index]!;
+		const sourceAlpha = source >>> 24;
+		if (sourceAlpha === 0) continue;
+		const opacityByte = Math.max(
+			0,
+			Math.min(255, Math.round(layer.opacity * 255)),
+		);
+		const sa = ALPHA_PRODUCT[(sourceAlpha << 8) | opacityByte]!;
+		if (sa === 0) continue;
+		const destinationAlpha = output >>> 24;
+		if (destinationAlpha === 0) {
+			output = ((sa << 24) | (source & 0x00ffffff)) >>> 0;
+			continue;
 		}
+		if (sa === 255) {
+			output = (0xff000000 | (source & 0x00ffffff)) >>> 0;
+			continue;
+		}
+		output = blendPixelSlow(source, output, sa);
 	}
 
 	return output;
+}
+
+interface CompositeCache {
+	revision: number;
+	frames: Map<string, Uint32Array>;
+}
+
+const COMPOSITE_CACHE_LIMIT = 8;
+const compositeCaches = new WeakMap<PixelDoc, CompositeCache>();
+
+/**
+ * Memoized `compositeFrame` for the viewport and preview. The returned buffer
+ * is shared and must be treated as read-only. Caches at most eight variants
+ * per document and drops everything when the document revision changes.
+ */
+export function compositeFrameCached(
+	doc: PixelDoc,
+	frameIndex: number,
+	revision: number,
+	includeReferences = false,
+): Uint32Array {
+	let cache = compositeCaches.get(doc);
+	if (!cache || cache.revision !== revision) {
+		cache = { revision, frames: new Map() };
+		compositeCaches.set(doc, cache);
+	}
+
+	const key = `${frameIndex}:${includeReferences ? 1 : 0}`;
+	const existing = cache.frames.get(key);
+	if (existing) return existing;
+
+	const pixels = compositeFrame(doc, frameIndex, includeReferences);
+	cache.frames.set(key, pixels);
+	if (cache.frames.size > COMPOSITE_CACHE_LIMIT) {
+		const oldest = cache.frames.keys().next().value;
+		if (oldest !== undefined) cache.frames.delete(oldest);
+	}
+	return pixels;
 }

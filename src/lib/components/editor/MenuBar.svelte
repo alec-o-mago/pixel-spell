@@ -1,7 +1,11 @@
 <script lang="ts">
+	import Asterisk from "@lucide/svelte/icons/asterisk";
+	import ChevronDown from "@lucide/svelte/icons/chevron-down";
 	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
 	import Copy from "@lucide/svelte/icons/copy";
+	import Crop from "@lucide/svelte/icons/crop";
 	import Eraser from "@lucide/svelte/icons/eraser";
+	import Expand from "@lucide/svelte/icons/expand";
 	import FileDown from "@lucide/svelte/icons/file-down";
 	import FileInput from "@lucide/svelte/icons/file-input";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
@@ -9,14 +13,16 @@
 	import FlipVertical2 from "@lucide/svelte/icons/flip-vertical-2";
 	import FolderOpen from "@lucide/svelte/icons/folder-open";
 	import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
+	import Images from "@lucide/svelte/icons/images";
 	import Info from "@lucide/svelte/icons/info";
 	import Keyboard from "@lucide/svelte/icons/keyboard";
-	import LineSquiggle from "@lucide/svelte/icons/line-squiggle";
 	import Lock from "@lucide/svelte/icons/lock";
 	import Maximize2 from "@lucide/svelte/icons/maximize-2";
 	import Moon from "@lucide/svelte/icons/moon";
 	import Redo2 from "@lucide/svelte/icons/redo-2";
 	import Save from "@lucide/svelte/icons/save";
+	import Scaling from "@lucide/svelte/icons/scaling";
+	import Scan from "@lucide/svelte/icons/scan";
 	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -29,7 +35,11 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import { readProjectFile } from "$lib/editor/file.js";
-	import { editor } from "$lib/editor/editor.svelte.js";
+	import {
+		editor,
+		RADIAL_SYMMETRY_MAX,
+		RADIAL_SYMMETRY_MIN,
+	} from "$lib/editor/editor.svelte.js";
 
 	let {
 		onNew,
@@ -37,16 +47,65 @@
 		onExport,
 		onShortcuts,
 		onAbout,
+		onScaleCanvas,
+		onResizeCanvas,
 	}: {
 		onNew: () => void;
 		onImport: () => void;
 		onExport: () => void;
 		onShortcuts: () => void;
 		onAbout: () => void;
+		onScaleCanvas: () => void;
+		onResizeCanvas: () => void;
 	} = $props();
 
 	let fileInput: HTMLInputElement | undefined;
+	let projectMenuOpen = $state(false);
+	let cropContentEnabled = $state(false);
+	let cropSelectionEnabled = $state(false);
+	let cropCheckFrame = 0;
 	let cursor = $derived(editor.cursor ?? editor.lastCursor);
+	const RADIAL_COUNTS = Array.from(
+		{ length: RADIAL_SYMMETRY_MAX - RADIAL_SYMMETRY_MIN + 1 },
+		(_, index) => RADIAL_SYMMETRY_MIN + index,
+	);
+
+	$effect(() => {
+		if (!projectMenuOpen) return;
+		// Compute availability only while the menu is open; content bounds are
+		// too expensive to scan on every menu-bar render.
+		editor.revision;
+		editor.structureRevision;
+		editor.selectionRevision;
+		if (cropCheckFrame) cancelAnimationFrame(cropCheckFrame);
+		cropCheckFrame = requestAnimationFrame(() => {
+			cropCheckFrame = 0;
+			const content = editor.findContentBounds();
+			cropContentEnabled =
+				content !== null &&
+				!(
+					content.x === 0 &&
+					content.y === 0 &&
+					content.width === editor.doc.width &&
+					content.height === editor.doc.height
+				);
+			const bounds = editor.selectionCropBounds();
+			cropSelectionEnabled =
+				bounds !== null &&
+				!(
+					bounds.x === 0 &&
+					bounds.y === 0 &&
+					bounds.width === editor.doc.width &&
+					bounds.height === editor.doc.height
+				);
+		});
+		return () => {
+			if (cropCheckFrame) {
+				cancelAnimationFrame(cropCheckFrame);
+				cropCheckFrame = 0;
+			}
+		};
+	});
 
 	function activeRing(active: boolean): string {
 		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
@@ -62,12 +121,16 @@
 		input.value = "";
 		if (!file) return;
 
-		const project = await readProjectFile(file);
-		if (!project) {
-			window.alert("That file could not be opened as a Pixel Spell project.");
-			return;
+		try {
+			const project = await readProjectFile(file);
+			if (!project) {
+				window.alert("That file could not be opened as a Pixel Spell project.");
+				return;
+			}
+			editor.openProject(project);
+		} catch {
+			window.alert("That file could not be read. It may be corrupted or too large.");
 		}
-		editor.openProject(project);
 	}
 </script>
 
@@ -159,6 +222,41 @@
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 
+		<DropdownMenu.Root bind:open={projectMenuOpen}>
+			<DropdownMenu.Trigger
+				class="h-8 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
+			>
+				Project
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content class="w-60">
+				<DropdownMenu.Item onSelect={onScaleCanvas}>
+					<Scaling class="size-4" />
+					Scale Canvas…
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={onResizeCanvas}>
+					<Expand class="size-4" />
+					Resize Canvas…
+				</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item
+					onSelect={() => editor.cropToContent()}
+					disabled={!cropContentEnabled}
+					title="Trim transparent borders around all visible artwork. Reference layers and board images are ignored."
+				>
+					<Scan class="size-4" />
+					Crop to Content
+				</DropdownMenu.Item>
+				<DropdownMenu.Item
+					onSelect={() => editor.cropToSelection()}
+					disabled={!cropSelectionEnabled}
+					title="Crop to the smallest rectangle containing the selected pixels."
+				>
+					<Crop class="size-4" />
+					Crop to Selection
+				</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
+
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
 				class="h-8 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
@@ -186,6 +284,10 @@
 				<DropdownMenu.CheckboxItem bind:checked={editor.showPreview}>
 					<ScanEye class="size-4" />
 					Show preview
+				</DropdownMenu.CheckboxItem>
+				<DropdownMenu.CheckboxItem bind:checked={editor.showReferenceBoard}>
+					<Images class="size-4" />
+					Show reference board
 				</DropdownMenu.CheckboxItem>
 				<DropdownMenu.Item onSelect={() => editor.toggleTheme()}>
 					{#if editor.theme === "dark"}
@@ -239,29 +341,6 @@
 	</div>
 
 	<div class="flex shrink-0 items-center gap-3 pr-1">
-		<Tooltip.Root>
-			<Tooltip.Trigger>
-				{#snippet child({ props })}
-					<Button
-						{...props}
-						variant="ghost"
-						size="icon-sm"
-						class={`text-muted-foreground ${activeRing(editor.pixelPerfect)}`}
-						onclick={() => (editor.pixelPerfect = !editor.pixelPerfect)}
-						aria-label="Toggle pixel perfect"
-						aria-pressed={editor.pixelPerfect}
-					>
-						<LineSquiggle class="size-4" />
-					</Button>
-				{/snippet}
-			</Tooltip.Trigger>
-			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
-				Pixel perfect — remove extra corner pixels
-			</Tooltip.Content>
-		</Tooltip.Root>
-
-		<Separator orientation="vertical" class="mx-1 h-5" />
-
 		<Tooltip.Root>
 			<Tooltip.Trigger>
 				{#snippet child({ props })}
@@ -386,6 +465,70 @@
 						{...props}
 						variant="ghost"
 						size="icon-sm"
+						class={`text-muted-foreground ${activeRing(editor.radialEnabled)}`}
+						onclick={() => editor.toggleRadial()}
+						aria-label="Toggle radial symmetry"
+						aria-pressed={editor.radialEnabled}
+					>
+						<Asterisk class="size-4" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+				{editor.radialEnabled
+					? `Radial symmetry — ${editor.radialCount}-fold`
+					: "Radial symmetry"}
+			</Tooltip.Content>
+		</Tooltip.Root>
+
+		<DropdownMenu.Root>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					{#snippet child({ props: tooltipProps })}
+						<DropdownMenu.Trigger>
+							{#snippet child({ props: menuProps })}
+								<Button
+									{...tooltipProps}
+									{...menuProps}
+									variant="ghost"
+									size="icon-sm"
+									class="text-muted-foreground"
+									aria-label="Radial symmetry settings"
+								>
+									<ChevronDown class="size-4" />
+								</Button>
+							{/snippet}
+						</DropdownMenu.Trigger>
+					{/snippet}
+				</Tooltip.Trigger>
+				<Tooltip.Content side="bottom" sideOffset={8} class="px-2 py-1 text-xs">
+					Radial symmetry settings
+				</Tooltip.Content>
+			</Tooltip.Root>
+			<DropdownMenu.Content class="w-44" side="bottom" align="end">
+				<DropdownMenu.Label>Symmetry count</DropdownMenu.Label>
+				<DropdownMenu.RadioGroup
+					value={String(editor.radialCount)}
+					onValueChange={(value) => editor.setRadialCount(Number(value))}
+				>
+					{#each RADIAL_COUNTS as count (count)}
+						<DropdownMenu.RadioItem value={String(count)} closeOnSelect>
+							{count}-fold
+						</DropdownMenu.RadioItem>
+					{/each}
+				</DropdownMenu.RadioGroup>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
+
+		<Separator orientation="vertical" class="mx-1 h-5" />
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="icon-sm"
 						class="text-muted-foreground"
 						onclick={() => editor.toggleTheme()}
 						aria-label={editor.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
@@ -407,7 +550,7 @@
 	<input
 		bind:this={fileInput}
 		type="file"
-		accept=".pixelspell,application/json"
+		accept=".pixelspell,application/octet-stream"
 		class="hidden"
 		onchange={handleFileChange}
 	/>

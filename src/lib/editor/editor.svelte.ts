@@ -1,7 +1,40 @@
+import {
+	type AutosaveRecord,
+	deleteAutosave,
+	writeAutosave,
+} from "./autosave.js";
+import {
+	type PixelBounds,
+	contentBoundsOf,
+	resizePixels,
+	scalePixelsNearest,
+} from "./canvas.js";
 import { isTransparent, normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
-import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
-import { saveProjectFile, type LoadedProject } from "./file.js";
+import {
+	MAX_FRAME_DURATION,
+	MIN_FRAME_DURATION,
+	cloneDoc,
+	createDoc,
+	createLayer,
+	frameDurationMs,
+	loopRangeOf,
+	uid,
+} from "./doc.js";
+import {
+	MAX_PROJECT_FRAMES,
+	MAX_PROJECT_LAYERS,
+	saveProjectFile,
+	serializeProject,
+	type LoadedProject,
+} from "./file.js";
+import {
+	MAX_REFERENCE_COUNT,
+	cropPixelsToCanvas,
+	defaultReferencePlacement,
+	fitPixelsToCanvas,
+} from "./reference.js";
 import { selectionBounds } from "./selection.js";
+import { usesPixelPerfect } from "./tools.js";
 import {
 	DEFAULT_PALETTE_ID,
 	MAX_PALETTE_COLORS,
@@ -13,6 +46,7 @@ import {
 import type {
 	BackgroundKind,
 	ColorSlot,
+	Frame,
 	GradientDither,
 	GradientShape,
 	Layer,
@@ -21,16 +55,24 @@ import type {
 	PixelDoc,
 	Point,
 	ProjectTab,
+	RadialSymmetry,
+	ReferenceImage,
 	ShapeKind,
 	ToolId,
 	ViewportSize,
 } from "./types.js";
 
 const HISTORY_LIMIT = 80;
+/** Keep undo history bounded even for very large documents. */
+const HISTORY_BYTE_LIMIT = 128 * 1024 * 1024;
 const MIN_SIZE = 1;
 const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
+
+/** Radial symmetry copies include the original stroke point. */
+export const RADIAL_SYMMETRY_MIN = 2;
+export const RADIAL_SYMMETRY_MAX = 16;
 
 const clamp = (value: number, min: number, max: number) =>
 	Math.max(min, Math.min(max, value));
@@ -43,17 +85,46 @@ function readStoredTheme(): "light" | "dark" {
 	}
 }
 
+interface CelPatch {
+	layerId: string;
+	frame: number;
+	pixels: Uint32Array;
+}
+
+/**
+ * History entries are either a full document clone (structural edits) or one
+ * or more previous cel buffers (pixel edits). Pixel edits are the common case,
+ * so this avoids cloning every layer and frame on every brush stroke.
+ */
+type HistoryEntry =
+	| { kind: "full"; doc: PixelDoc }
+	| { kind: "cels"; patches: CelPatch[] };
+
 interface ProjectSnapshot {
 	doc: PixelDoc;
 	activeLayerId: string;
 	activeFrame: number;
+	activeReferenceId: string | null;
+	frameSelection: string[];
+	frameAnchorId: string | null;
 	zoom: number | null;
 	panX: number;
 	panY: number;
 	rotation: number;
 	selection: Uint8Array | null;
-	undo: PixelDoc[];
-	redo: PixelDoc[];
+	undo: HistoryEntry[];
+	redo: HistoryEntry[];
+	undoBytes: number;
+	redoBytes: number;
+}
+
+/** Frames copied from the timeline, including one cel per layer. */
+interface FrameClipboard {
+	frames: {
+		duration?: number;
+		tag?: string;
+		cels: Map<string, Uint32Array>;
+	}[];
 }
 
 /** In-memory copy of selected pixels, independent of the OS clipboard. */
@@ -87,6 +158,10 @@ export class EditorState {
 	doc = $state<PixelDoc>(createDoc(32, 32));
 	activeLayerId = $state<string>(this.doc.layers[0].id);
 	activeFrame = $state(0);
+	/** Selected frame ids, including the active frame. */
+	frameSelection = $state<string[]>([this.doc.frames[0]!.id]);
+	/** Selected image on the project-level reference board. */
+	activeReferenceId = $state<string | null>(null);
 
 	tool = $state<ToolId>("pencil");
 	primaryColor = $state("#18181b");
@@ -113,8 +188,15 @@ export class EditorState {
 	mirrorYOffset = $state(0);
 	mirrorDiagonalDownOffset = $state(0);
 	mirrorDiagonalUpOffset = $state(0);
+	radialEnabled = $state(false);
+	/** Number of rotational copies, including the original (2–16). */
+	radialCount = $state(6);
+	/** Radial symmetry center offset from the canvas center, in document pixels. */
+	radialCenterX = $state(0);
+	radialCenterY = $state(0);
 	lockAlpha = $state(false);
-	pixelPerfect = $state(false);
+	/** Per-tool pixel-perfect preference; absent means off. */
+	pixelPerfectByTool = $state<Partial<Record<ToolId, boolean>>>({});
 	shapeFilled = $state(false);
 	/** Shape drawn by the combined shape tool. */
 	shapeKind = $state<ShapeKind>("rectangle");
@@ -133,12 +215,24 @@ export class EditorState {
 	selection = $state<Uint8Array | null>(null);
 	selectionRevision = $state(0);
 	hasClipboard = $state(false);
+	hasFrameClipboard = $state(false);
 	/** Temporary preview content that has not been written into a cel yet. */
 	floating = $state<FloatingSelection | null>(null);
+
+	onionEnabled = $state(false);
+	onionShowPrevious = $state(true);
+	onionShowNext = $state(true);
+	/** Number of neighboring frames drawn on each side (1–3). */
+	onionRange = $state(1);
+	/** Opacity multiplier applied to each onion frame. */
+	onionOpacity = $state(0.3);
+	onionTintPrevious = $state("#ef4444");
+	onionTintNext = $state("#22c55e");
 
 	showGrid = $state(true);
 	gridSize = $state(1);
 	showPreview = $state(false);
+	showReferenceBoard = $state(false);
 	zoom = $state<number | null>(null);
 	/** Canvas center offset from the stage center, in screen pixels. */
 	panX = $state(0);
@@ -153,6 +247,10 @@ export class EditorState {
 	/** Last cursor position over the canvas, kept for the menu bar readout. */
 	lastCursor = $state<Point | null>(null);
 	revision = $state(0);
+	/** Increments when layers/frames are added, removed, reordered, or restored. */
+	structureRevision = $state(0);
+	/** Increments when layer visibility or opacity changes. */
+	layerAppearanceRevision = $state(0);
 	dirty = $state(false);
 	modified = $state(false);
 	name = $state("Untitled");
@@ -165,10 +263,14 @@ export class EditorState {
 	/** Increments only when undo/redo restores a document. */
 	historyActionRevision = $state(0);
 
-	#undo: PixelDoc[] = [];
-	#redo: PixelDoc[] = [];
+	#undo: HistoryEntry[] = [];
+	#redo: HistoryEntry[] = [];
+	#undoBytes = 0;
+	#redoBytes = 0;
 	#states = new Map<string, ProjectSnapshot>();
 	#clipboard: SelectionClipboard | null = null;
+	#frameClipboard: FrameClipboard | null = null;
+	#frameAnchorId: string | null = this.doc.frames[0]!.id;
 
 	constructor() {
 		const id = uid("project");
@@ -185,6 +287,9 @@ export class EditorState {
 			doc: this.doc,
 			activeLayerId: this.activeLayerId,
 			activeFrame: this.activeFrame,
+			activeReferenceId: null,
+			frameSelection: this.frameSelection,
+			frameAnchorId: this.#frameAnchorId,
 			zoom: this.zoom,
 			panX: 0,
 			panY: 0,
@@ -192,6 +297,8 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 
 		const paletteState = loadPaletteState();
@@ -204,6 +311,28 @@ export class EditorState {
 			this.doc.layers.find((layer) => layer.id === this.activeLayerId) ??
 			this.doc.layers[this.doc.layers.length - 1]!
 		);
+	}
+
+	get activeReference(): ReferenceImage | null {
+		return (
+			this.doc.references.find(
+				(reference) => reference.id === this.activeReferenceId,
+			) ?? null
+		);
+	}
+
+	get activeLayerDrawable(): boolean {
+		const layer = this.activeLayer;
+		return (
+			!!layer &&
+			layer.role !== "reference" &&
+			!layer.locked &&
+			layer.visible
+		);
+	}
+
+	get referenceLayerCount(): number {
+		return this.doc.layers.filter((layer) => layer.role === "reference").length;
 	}
 
 	get activePalette(): Palette {
@@ -223,6 +352,73 @@ export class EditorState {
 
 	get frameCount(): number {
 		return this.doc.frames.length;
+	}
+
+	/** Selected frame indices in timeline order. */
+	get selectedFrameIndices(): number[] {
+		const selected = new Set(this.frameSelection);
+		const indices: number[] = [];
+		this.doc.frames.forEach((frame, index) => {
+			if (selected.has(frame.id)) indices.push(index);
+		});
+		return indices;
+	}
+
+	get selectedFrameCount(): number {
+		return this.selectedFrameIndices.length;
+	}
+
+	get loopRange(): { start: number; end: number } {
+		return loopRangeOf(this.doc);
+	}
+
+	get hasLoopRange(): boolean {
+		const range = loopRangeOf(this.doc);
+		return range.start > 0 || range.end < this.doc.frames.length - 1;
+	}
+
+	/** Neighboring frames drawn as onion skins around the active frame. */
+	get onionSkins(): {
+		frame: number;
+		direction: "previous" | "next";
+		distance: number;
+	}[] {
+		if (!this.onionEnabled || this.playing || this.doc.frames.length <= 1) {
+			return [];
+		}
+		const range = loopRangeOf(this.doc);
+		if (range.end <= range.start) return [];
+
+		const skins: {
+			frame: number;
+			direction: "previous" | "next";
+			distance: number;
+		}[] = [];
+		const seen = new Set<number>([this.activeFrame]);
+
+		const walk = (direction: "previous" | "next"): void => {
+			if (direction === "previous" && !this.onionShowPrevious) return;
+			if (direction === "next" && !this.onionShowNext) return;
+
+			let index = this.activeFrame;
+			for (let distance = 1; distance <= this.onionRange; distance++) {
+				index =
+					direction === "previous"
+						? index - 1 < range.start
+							? range.end
+							: index - 1
+						: index + 1 > range.end
+							? range.start
+							: index + 1;
+				if (seen.has(index)) break;
+				seen.add(index);
+				skins.push({ frame: index, direction, distance });
+			}
+		};
+
+		walk("previous");
+		walk("next");
+		return skins;
 	}
 
 	get hasSelection(): boolean {
@@ -271,6 +467,27 @@ export class EditorState {
 		return axes;
 	}
 
+	get radialSymmetry(): RadialSymmetry | null {
+		if (!this.radialEnabled) return null;
+		return {
+			count: clamp(
+				Math.round(this.radialCount),
+				RADIAL_SYMMETRY_MIN,
+				RADIAL_SYMMETRY_MAX,
+			),
+			centerX: clamp(
+				this.doc.width / 2 + this.radialCenterX,
+				0,
+				this.doc.width,
+			),
+			centerY: clamp(
+				this.doc.height / 2 + this.radialCenterY,
+				0,
+				this.doc.height,
+			),
+		};
+	}
+
 	get currentColor(): number {
 		return packColor(this.primaryColor, this.alpha);
 	}
@@ -299,6 +516,16 @@ export class EditorState {
 
 	setTool(tool: ToolId): void {
 		this.tool = tool;
+	}
+
+	/** Whether the tool has a pixel-perfect option and it is enabled. */
+	pixelPerfectFor(tool: ToolId): boolean {
+		return usesPixelPerfect(tool) && !!this.pixelPerfectByTool[tool];
+	}
+
+	setPixelPerfect(tool: ToolId, enabled: boolean): void {
+		if (!usesPixelPerfect(tool)) return;
+		this.pixelPerfectByTool[tool] = enabled;
 	}
 
 	setSelection(mask: Uint8Array | null, keepFloating = false): void {
@@ -422,7 +649,7 @@ export class EditorState {
 		const cel = layer?.cels[floating.frame];
 		if (!cel) return false;
 
-		this.pushHistory();
+		this.pushHistoryCel(floating.layerId, floating.frame);
 
 		const width = this.doc.width;
 		const height = this.doc.height;
@@ -520,7 +747,9 @@ export class EditorState {
 		}
 
 		if (changed) {
-			if (!floating.historyPushed) this.pushHistory();
+			if (!floating.historyPushed) {
+				this.pushHistoryCel(floating.layerId, floating.frame);
+			}
 			for (let y = 0; y < floating.height; y++) {
 				const destY = floating.originY + y;
 				if (destY < 0 || destY >= height) continue;
@@ -590,7 +819,31 @@ export class EditorState {
 			this.mirrorDiagonalUp = !this.mirrorDiagonalUp;
 			if (!this.mirrorDiagonalUp) this.mirrorDiagonalUpOffset = 0;
 		}
-		this.revision++;
+		// Mirror guides have their own overlay; the sprite pixels do not change.
+	}
+
+	toggleRadial(): void {
+		this.radialEnabled = !this.radialEnabled;
+		if (!this.radialEnabled) {
+			// A disabled radial guide always restarts at the canvas center.
+			this.radialCenterX = 0;
+			this.radialCenterY = 0;
+		}
+	}
+
+	setRadialCount(count: number): void {
+		if (!Number.isFinite(count)) return;
+		this.radialCount = clamp(
+			Math.round(count),
+			RADIAL_SYMMETRY_MIN,
+			RADIAL_SYMMETRY_MAX,
+		);
+	}
+
+	setRadialCenter(x: number, y: number): void {
+		if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+		this.radialCenterX = clamp(x, 0, this.doc.width) - this.doc.width / 2;
+		this.radialCenterY = clamp(y, 0, this.doc.height) - this.doc.height / 2;
 	}
 
 	setMirrorPosition(kind: MirrorKind, position: number): void {
@@ -608,8 +861,6 @@ export class EditorState {
 			this.mirrorDiagonalUpOffset =
 				clamp(position, 0, width + height) - (width + height) / 2;
 		}
-
-		this.revision++;
 	}
 
 	setPrimaryColor(hex: string): void {
@@ -628,6 +879,7 @@ export class EditorState {
 	}
 
 	setColorAlpha(slot: ColorSlot, alpha: number): void {
+		if (!Number.isFinite(alpha)) return;
 		const value = clamp(Math.round(alpha), 0, 255);
 		if (slot === "secondary") this.secondaryAlpha = value;
 		else this.alpha = value;
@@ -801,24 +1053,226 @@ export class EditorState {
 		this.modified = true;
 	}
 
+	#autosaveRecord(
+		id: string,
+		doc: PixelDoc,
+		name: string,
+		activeFrame: number,
+		activeLayerId: string,
+		active: boolean,
+		position: number,
+	): AutosaveRecord | null {
+		try {
+			return {
+				id,
+				name,
+				bytes: serializeProject(
+					doc,
+					this.activePalette.colors,
+					name,
+					activeFrame,
+					activeLayerId,
+				),
+				active,
+				position,
+				savedAt: Date.now(),
+			};
+		} catch {
+			// Documents that are too large for the project format remain fully
+			// editable; they simply cannot be written to the recovery store.
+			return null;
+		}
+	}
+
+	#autosaveActiveProject(active: boolean): void {
+		if (!this.dirty) return;
+		const record = this.#autosaveRecord(
+			this.activeProjectId,
+			this.doc,
+			this.name,
+			this.activeFrame,
+			this.activeLayerId,
+			active,
+			Math.max(
+				0,
+				this.projects.findIndex(
+					(project) => project.id === this.activeProjectId,
+				),
+			),
+		);
+		if (record) void writeAutosave(record);
+	}
+
+	/**
+	 * Writes a recovery snapshot for the active project. Autosaves are kept in
+	 * IndexedDB so unsaved tabs survive a crash or reload.
+	 */
+	autosaveNow(): void {
+		this.#autosaveActiveProject(true);
+	}
+
+	/**
+	 * Writes a snapshot for every dirty tab, including inactive ones. Used after
+	 * restoring a workspace so a second crash cannot drop the other tabs.
+	 */
+	autosaveAll(): void {
+		this.#autosaveActiveProject(true);
+		for (const project of this.projects) {
+			if (project.id === this.activeProjectId) continue;
+			const snapshot = this.#states.get(project.id);
+			if (!snapshot || !project.dirty) continue;
+			const record = this.#autosaveRecord(
+				project.id,
+				snapshot.doc,
+				project.name,
+				snapshot.activeFrame,
+				snapshot.activeLayerId,
+				false,
+				Math.max(
+					0,
+					this.projects.findIndex((item) => item.id === project.id),
+				),
+			);
+			if (record) void writeAutosave(record);
+		}
+	}
+
+	#entryBytes(entry: HistoryEntry): number {
+		if (entry.kind === "cels") {
+			let bytes = 0;
+			for (const patch of entry.patches) bytes += patch.pixels.byteLength;
+			return bytes;
+		}
+		return (
+			entry.doc.width *
+			entry.doc.height *
+			4 *
+			entry.doc.frames.length *
+			entry.doc.layers.length
+		);
+	}
+
+	/** Records a full document snapshot. Used for structural edits. */
 	pushHistory(): void {
 		// Any new edit implicitly applies content that is still floating.
 		if (this.floating) this.commitFloatingSelection();
-		this.#undo.push(cloneDoc(this.doc));
-		if (this.#undo.length > HISTORY_LIMIT) this.#undo.shift();
+		const entry: HistoryEntry = { kind: "full", doc: cloneDoc(this.doc) };
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
 		this.#redo = [];
+		this.#redoBytes = 0;
 		this.undoCount = this.#undo.length;
 		this.redoCount = 0;
 		this.dirty = true;
 		this.modified = true;
 	}
 
+	/**
+	 * Records only the active cel before a pixel edit. This is the hot path for
+	 * drawing, so it must not clone every layer and frame in the document.
+	 */
+	pushHistoryCel(
+		layerId: string = this.activeLayerId,
+		frame: number = this.activeFrame,
+	): void {
+		if (this.floating) this.commitFloatingSelection();
+		const layer = this.doc.layers.find((item) => item.id === layerId);
+		const cel = layer?.cels[frame];
+		if (!cel) return;
+		const entry: HistoryEntry = {
+			kind: "cels",
+			patches: [{ layerId, frame, pixels: new Uint32Array(cel) }],
+		};
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
+		this.#redo = [];
+		this.#redoBytes = 0;
+		this.undoCount = this.#undo.length;
+		this.redoCount = 0;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	/** Records several cels at once (for example, clearing a whole frame). */
+	pushHistoryCels(patches: { layerId: string; frame: number }[]): void {
+		if (this.floating) this.commitFloatingSelection();
+		const captured: CelPatch[] = [];
+		for (const patch of patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			if (!cel) continue;
+			captured.push({
+				layerId: patch.layerId,
+				frame: patch.frame,
+				pixels: new Uint32Array(cel),
+			});
+		}
+		if (captured.length === 0) return;
+		const entry: HistoryEntry = { kind: "cels", patches: captured };
+		this.#undo.push(entry);
+		this.#undoBytes += this.#entryBytes(entry);
+		this.#trimHistory();
+		this.#redo = [];
+		this.#redoBytes = 0;
+		this.undoCount = this.#undo.length;
+		this.redoCount = 0;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	#trimHistory(): void {
+		while (
+			this.#undo.length > HISTORY_LIMIT ||
+			(this.#undo.length > 1 && this.#undoBytes > HISTORY_BYTE_LIMIT)
+		) {
+			const removed = this.#undo.shift();
+			if (!removed) break;
+			this.#undoBytes -= this.#entryBytes(removed);
+		}
+		if (this.#undoBytes < 0) this.#undoBytes = 0;
+	}
+
+	/** Captures the current state of the cels an entry will overwrite. */
+	#captureHistoryEntry(entry: HistoryEntry): HistoryEntry {
+		if (entry.kind === "full") {
+			return { kind: "full", doc: cloneDoc(this.doc) };
+		}
+		const patches: CelPatch[] = [];
+		for (const patch of entry.patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			patches.push({
+				layerId: patch.layerId,
+				frame: patch.frame,
+				pixels: cel ? new Uint32Array(cel) : new Uint32Array(patch.pixels),
+			});
+		}
+		return { kind: "cels", patches };
+	}
+
+	#applyHistoryEntry(entry: HistoryEntry): void {
+		if (entry.kind === "full") {
+			this.doc = entry.doc;
+			return;
+		}
+		for (const patch of entry.patches) {
+			const layer = this.doc.layers.find((item) => item.id === patch.layerId);
+			const cel = layer?.cels[patch.frame];
+			if (cel) cel.set(patch.pixels);
+		}
+	}
+
 	undo(): void {
 		if (this.floating) this.commitFloatingSelection();
 		const previous = this.#undo.pop();
 		if (!previous) return;
-		this.#redo.push(cloneDoc(this.doc));
-		this.doc = previous;
+		this.#undoBytes -= this.#entryBytes(previous);
+		const redoEntry = this.#captureHistoryEntry(previous);
+		this.#redo.push(redoEntry);
+		this.#redoBytes += this.#entryBytes(redoEntry);
+		this.#applyHistoryEntry(previous);
 		this.#afterHistoryRestore();
 		this.undoCount = this.#undo.length;
 		this.redoCount = this.#redo.length;
@@ -828,8 +1282,12 @@ export class EditorState {
 		if (this.floating) this.commitFloatingSelection();
 		const next = this.#redo.pop();
 		if (!next) return;
-		this.#undo.push(cloneDoc(this.doc));
-		this.doc = next;
+		this.#redoBytes -= this.#entryBytes(next);
+		const undoEntry = this.#captureHistoryEntry(next);
+		this.#undo.push(undoEntry);
+		this.#undoBytes += this.#entryBytes(undoEntry);
+		this.#trimHistory();
+		this.#applyHistoryEntry(next);
 		this.#afterHistoryRestore();
 		this.undoCount = this.#undo.length;
 		this.redoCount = this.#redo.length;
@@ -839,16 +1297,39 @@ export class EditorState {
 		if (!this.doc.layers.some((layer) => layer.id === this.activeLayerId)) {
 			this.activeLayerId = this.doc.layers[this.doc.layers.length - 1]!.id;
 		}
+		if (
+			this.activeReferenceId &&
+			!this.doc.references.some(
+				(reference) => reference.id === this.activeReferenceId,
+			)
+		) {
+			this.activeReferenceId = null;
+		}
 		this.activeFrame = clamp(this.activeFrame, 0, this.doc.frames.length - 1);
+		this.#restoreFrameSelection(this.frameSelection, this.#frameAnchorId);
 		this.playing = false;
 		this.floating = null;
 		// The selection may no longer match the restored pixels.
 		this.selection = null;
 		this.selectionRevision++;
+		this.structureRevision++;
 		this.historyActionRevision++;
 		this.revision++;
 		this.dirty = true;
 		this.modified = true;
+	}
+
+	#restoreFrameSelection(ids: string[], anchorId: string | null): void {
+		const valid = new Set(this.doc.frames.map((frame) => frame.id));
+		const selection = (Array.isArray(ids) ? ids : []).filter((id) =>
+			valid.has(id),
+		);
+		const activeId = this.doc.frames[this.activeFrame]?.id;
+		if (activeId && !selection.includes(activeId)) selection.push(activeId);
+		this.frameSelection =
+			selection.length > 0 ? selection : activeId ? [activeId] : [];
+		this.#frameAnchorId =
+			anchorId && valid.has(anchorId) ? anchorId : (activeId ?? null);
 	}
 
 	#syncActiveProject(): void {
@@ -858,12 +1339,20 @@ export class EditorState {
 		const snapshot = this.#states.get(this.activeProjectId);
 		if (!tab || !snapshot) return;
 
+		// Persist the outgoing tab before its live fields are replaced. This is
+		// skipped when the tab was already removed (for example, when closing
+		// the last project), so a discarded autosave cannot be resurrected.
+		this.#autosaveActiveProject(false);
+
 		tab.name = this.name;
 		tab.dirty = this.dirty;
 		tab.modified = this.modified;
 		snapshot.doc = this.doc;
 		snapshot.activeLayerId = this.activeLayerId;
 		snapshot.activeFrame = this.activeFrame;
+		snapshot.activeReferenceId = this.activeReferenceId;
+		snapshot.frameSelection = this.frameSelection;
+		snapshot.frameAnchorId = this.#frameAnchorId;
 		snapshot.zoom = this.zoom;
 		snapshot.panX = this.panX;
 		snapshot.panY = this.panY;
@@ -871,6 +1360,8 @@ export class EditorState {
 		snapshot.selection = this.selection;
 		snapshot.undo = this.#undo;
 		snapshot.redo = this.#redo;
+		snapshot.undoBytes = this.#undoBytes;
+		snapshot.redoBytes = this.#redoBytes;
 	}
 
 	#activateProject(id: string): void {
@@ -882,6 +1373,8 @@ export class EditorState {
 		this.doc = snapshot.doc;
 		this.activeLayerId = snapshot.activeLayerId;
 		this.activeFrame = snapshot.activeFrame;
+		this.activeReferenceId = snapshot.activeReferenceId;
+		this.#restoreFrameSelection(snapshot.frameSelection, snapshot.frameAnchorId);
 		this.zoom = snapshot.zoom;
 		this.panX = snapshot.panX;
 		this.panY = snapshot.panY;
@@ -894,10 +1387,13 @@ export class EditorState {
 		this.modified = tab.modified;
 		this.#undo = snapshot.undo;
 		this.#redo = snapshot.redo;
+		this.#undoBytes = snapshot.undoBytes;
+		this.#redoBytes = snapshot.redoBytes;
 		this.undoCount = snapshot.undo.length;
 		this.redoCount = snapshot.redo.length;
 		this.cursor = null;
 		this.playing = false;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -928,6 +1424,26 @@ export class EditorState {
 		return this.projects.find((project) => project.id === id)?.name ?? "Untitled";
 	}
 
+	/** Renames the active project tab and marks the project as unsaved. */
+	renameProject(name: string): boolean {
+		const trimmed = name.trim().slice(0, 60);
+		if (!trimmed || trimmed === this.name) return false;
+
+		this.name = trimmed;
+		this.dirty = true;
+		this.modified = true;
+
+		const tab = this.projects.find(
+			(project) => project.id === this.activeProjectId,
+		);
+		if (tab) {
+			tab.name = trimmed;
+			tab.dirty = true;
+			tab.modified = true;
+		}
+		return true;
+	}
+
 	selectProject(id: string): void {
 		if (id === this.activeProjectId) return;
 		if (!this.projects.some((project) => project.id === id)) return;
@@ -943,6 +1459,8 @@ export class EditorState {
 		const wasActive = id === this.activeProjectId;
 		this.projects.splice(index, 1);
 		this.#states.delete(id);
+		// Closing without saving explicitly discards the recoverable work.
+		void deleteAutosave(id);
 
 		if (this.projects.length === 0) {
 			this.newProject(32, 32);
@@ -974,6 +1492,9 @@ export class EditorState {
 			doc,
 			activeLayerId: doc.layers[0].id,
 			activeFrame: 0,
+			activeReferenceId: null,
+			frameSelection: [doc.frames[0]!.id],
+			frameAnchorId: doc.frames[0]!.id,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -981,12 +1502,17 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 		this.projects.push({ id, name, dirty: false, modified: false });
 		this.#activateProject(id);
 	}
 
-	openProject(project: LoadedProject): void {
+	openProject(
+		project: LoadedProject,
+		options: { dirty?: boolean } = {},
+	): string {
 		const doc = project.doc;
 		const activeLayerId = doc.layers.some((layer) => layer.id === project.activeLayerId)
 			? project.activeLayerId
@@ -1000,6 +1526,9 @@ export class EditorState {
 			doc,
 			activeLayerId,
 			activeFrame,
+			activeReferenceId: null,
+			frameSelection: [doc.frames[activeFrame]!.id],
+			frameAnchorId: doc.frames[activeFrame]!.id,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -1007,9 +1536,17 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
-		this.projects.push({ id, name, dirty: false, modified: true });
+		this.projects.push({
+			id,
+			name,
+			dirty: options.dirty === true,
+			modified: true,
+		});
 		this.#activateProject(id);
+		return id;
 	}
 
 	/** Creates a new, unsaved project tab from an imported image. */
@@ -1039,6 +1576,7 @@ export class EditorState {
 					cels: [pixels],
 				},
 			],
+			references: [],
 		};
 
 		const requestedName = image.name.trim().slice(0, 60);
@@ -1050,6 +1588,9 @@ export class EditorState {
 			doc,
 			activeLayerId: doc.layers[0]!.id,
 			activeFrame: 0,
+			activeReferenceId: null,
+			frameSelection: [doc.frames[0]!.id],
+			frameAnchorId: doc.frames[0]!.id,
 			zoom: null,
 			panX: 0,
 			panY: 0,
@@ -1057,34 +1598,398 @@ export class EditorState {
 			selection: null,
 			undo: [],
 			redo: [],
+			undoBytes: 0,
+			redoBytes: 0,
 		});
 		this.projects.push({ id, name, dirty: true, modified: true });
 		this.#activateProject(id);
 	}
 
+	/** Adds an imported image as a new normal layer on the active frame. */
+	importImageLayer(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		this.pushHistory();
+		const layer = createLayer(
+			image.name.trim().slice(0, 60) || "Imported layer",
+			this.doc.width,
+			this.doc.height,
+			this.doc.frames.length,
+		);
+		const cel = layer.cels[this.activeFrame]!;
+		cel.set(
+			cropPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.doc.layers.push(layer);
+		this.activeLayerId = layer.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Adds an imported image as a new frame on a normal layer. */
+	importImageFrame(image: {
+		name: string;
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): void {
+		if (this.doc.frames.length >= MAX_PROJECT_FRAMES) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		const active = this.activeLayer;
+		let target =
+			active && active.role !== "reference" && !active.locked ? active : null;
+		if (!target) {
+			for (let index = this.doc.layers.length - 1; index >= 0; index--) {
+				const layer = this.doc.layers[index]!;
+				if (layer.role !== "reference" && !layer.locked && layer.visible) {
+					target = layer;
+					break;
+				}
+			}
+		}
+
+		if (!target && this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		this.pushHistory();
+		if (!target) {
+			target = createLayer(
+				image.name.trim().slice(0, 60) || "Imported frame",
+				this.doc.width,
+				this.doc.height,
+				this.doc.frames.length,
+			);
+			this.doc.layers.push(target);
+		}
+
+		const index = this.activeFrame + 1;
+		const sourceFrame = this.doc.frames[this.activeFrame]!;
+		const frame: Frame = {
+			id: uid("frame"),
+			...(sourceFrame.duration !== undefined
+				? { duration: sourceFrame.duration }
+				: {}),
+		};
+		this.#shiftLoopForInsert(index, 1);
+		this.doc.frames.splice(index, 0, frame);
+		for (const layer of this.doc.layers) {
+			const source =
+				layer.role === "reference" ? layer.cels[this.activeFrame] : undefined;
+			layer.cels.splice(
+				index,
+				0,
+				source
+					? new Uint32Array(source)
+					: new Uint32Array(this.doc.width * this.doc.height),
+			);
+		}
+
+		const cel = target.cels[index]!;
+		cel.set(
+			cropPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.activeFrame = index;
+		this.frameSelection = [this.doc.frames[index]!.id];
+		this.#frameAnchorId = this.doc.frames[index]!.id;
+		this.activeLayerId = target.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Adds a locked, non-exported reference layer to the timeline. */
+	importReferenceLayer(
+		image: {
+			name: string;
+			width: number;
+			height: number;
+			pixels: Uint32Array;
+		},
+		options: { allFrames?: boolean } = {},
+	): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return;
+
+		this.pushHistory();
+		const layer = createLayer(
+			image.name.trim().slice(0, 60) || "Reference",
+			this.doc.width,
+			this.doc.height,
+			this.doc.frames.length,
+			"reference",
+		);
+		const fitted = fitPixelsToCanvas(
+			image.pixels,
+			imageWidth,
+			imageHeight,
+			this.doc.width,
+			this.doc.height,
+		);
+		const allFrames = options.allFrames ?? true;
+		if (allFrames) {
+			for (const cel of layer.cels) cel.set(fitted);
+		} else {
+			layer.cels[this.activeFrame]?.set(fitted);
+		}
+
+		this.doc.layers.push(layer);
+		this.activeLayerId = layer.id;
+		this.activeReferenceId = null;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/**
+	 * Replaces the active reference layer's cel on the current frame. Returns
+	 * false when the active layer is not a reference layer.
+	 */
+	setReferenceLayerImage(image: {
+		width: number;
+		height: number;
+		pixels: Uint32Array;
+	}): boolean {
+		const layer = this.activeLayer;
+		if (!layer || layer.role !== "reference") return false;
+		const cel = layer.cels[this.activeFrame];
+		if (!cel) return false;
+		const imageWidth = Math.max(1, Math.round(image.width));
+		const imageHeight = Math.max(1, Math.round(image.height));
+		if (image.pixels.length === 0) return false;
+
+		this.pushHistoryCel(layer.id, this.activeFrame);
+		cel.set(
+			fitPixelsToCanvas(
+				image.pixels,
+				imageWidth,
+				imageHeight,
+				this.doc.width,
+				this.doc.height,
+			),
+		);
+		this.revision++;
+		return true;
+	}
+
+	/** Adds an image to the project-level reference board. */
+	addReferenceImage(image: {
+		name: string;
+		bytes: Uint8Array;
+		mime: string;
+		imageWidth: number;
+		imageHeight: number;
+	}): string | null {
+		if (this.doc.references.length >= MAX_REFERENCE_COUNT) return null;
+		if (image.bytes.length === 0) return null;
+		const imageWidth = Math.max(1, Math.round(image.imageWidth));
+		const imageHeight = Math.max(1, Math.round(image.imageHeight));
+
+		this.pushHistory();
+		const placement = defaultReferencePlacement(
+			this.doc.width,
+			this.doc.height,
+			imageWidth,
+			imageHeight,
+			this.doc.references,
+		);
+		const reference: ReferenceImage = {
+			id: uid("reference"),
+			name: image.name.trim().slice(0, 60) || "Reference",
+			bytes: image.bytes,
+			mime: image.mime || "image/png",
+			imageWidth,
+			imageHeight,
+			x: placement.x,
+			y: placement.y,
+			width: placement.width,
+			height: placement.height,
+			rotation: 0,
+			opacity: 1,
+			visible: true,
+			locked: false,
+		};
+		this.doc.references.push(reference);
+		this.activeReferenceId = reference.id;
+		this.showReferenceBoard = true;
+		this.structureRevision++;
+		return reference.id;
+	}
+
+	removeReferenceImage(id: string): void {
+		const index = this.doc.references.findIndex(
+			(reference) => reference.id === id,
+		);
+		if (index < 0) return;
+		this.pushHistory();
+		this.doc.references.splice(index, 1);
+		if (this.activeReferenceId === id) this.activeReferenceId = null;
+		this.structureRevision++;
+	}
+
+	moveReferenceImage(id: string, x: number, y: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || reference.locked || !Number.isFinite(x) || !Number.isFinite(y)) {
+			return;
+		}
+		reference.x = x;
+		reference.y = y;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceSize(id: string, width: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(width)) return;
+		const nextWidth = clamp(Math.round(width), 1, 8192);
+		const ratio = reference.imageHeight / Math.max(1, reference.imageWidth);
+		const nextHeight = clamp(Math.round(nextWidth * ratio), 1, 8192);
+		this.#resizeReferenceAroundCenter(reference, nextWidth, nextHeight);
+	}
+
+	setReferenceZoom(id: string, zoom: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(zoom)) return;
+		const nextZoom = clamp(zoom, 0.01, 4);
+		const nextWidth = clamp(
+			Math.round(reference.imageWidth * nextZoom),
+			1,
+			16384,
+		);
+		const nextHeight = clamp(
+			Math.round(reference.imageHeight * nextZoom),
+			1,
+			16384,
+		);
+		this.#resizeReferenceAroundCenter(reference, nextWidth, nextHeight);
+	}
+
+	#resizeReferenceAroundCenter(
+		reference: ReferenceImage,
+		width: number,
+		height: number,
+	): void {
+		const centerX = reference.x + reference.width / 2;
+		const centerY = reference.y + reference.height / 2;
+		reference.width = width;
+		reference.height = height;
+		reference.x = centerX - width / 2;
+		reference.y = centerY - height / 2;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceRotation(id: string, rotation: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(rotation)) return;
+		reference.rotation = clamp(rotation, -180, 180);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	setReferenceOpacity(id: string, opacity: number): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference || !Number.isFinite(opacity)) return;
+		reference.opacity = clamp(opacity, 0, 1);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	renameReference(id: string, name: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		const trimmed = name.trim();
+		if (!reference || !trimmed) return;
+		reference.name = trimmed.slice(0, 60);
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	toggleReferenceVisibility(id: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference) return;
+		reference.visible = !reference.visible;
+		this.dirty = true;
+		this.modified = true;
+	}
+
+	toggleReferenceLock(id: string): void {
+		const reference = this.doc.references.find((item) => item.id === id);
+		if (!reference) return;
+		reference.locked = !reference.locked;
+		this.dirty = true;
+		this.modified = true;
+	}
+
 	markSaved(): void {
 		this.dirty = false;
 		this.modified = true;
+		// A saved project no longer needs a crash-recovery snapshot.
+		void deleteAutosave(this.activeProjectId);
 		this.#syncActiveProject();
 	}
 
 	saveToFile(): void {
 		if (this.floating) this.commitFloatingSelection();
-		saveProjectFile(
-			this.doc,
-			this.activePalette.colors,
-			this.name,
-			this.activeFrame,
-			this.activeLayerId,
-		);
-		this.markSaved();
+		try {
+			saveProjectFile(
+				this.doc,
+				this.activePalette.colors,
+				this.name,
+				this.activeFrame,
+				this.activeLayerId,
+			);
+			this.markSaved();
+		} catch (error) {
+			window.alert(
+				error instanceof Error
+					? error.message
+					: "The project could not be saved.",
+			);
+		}
 	}
 
 	selectLayer(id: string): void {
 		if (!this.doc.layers.some((layer) => layer.id === id)) return;
-		if (id === this.activeLayerId) return;
 		if (this.floating) this.commitFloatingSelection();
+		this.activeReferenceId = null;
+		if (id === this.activeLayerId) return;
 		this.activeLayerId = id;
+	}
+
+	selectReferenceImage(id: string | null): void {
+		if (
+			id !== null &&
+			!this.doc.references.some((reference) => reference.id === id)
+		) {
+			return;
+		}
+		this.activeReferenceId = id;
+	}
+
+	clearReferenceSelection(): void {
+		this.activeReferenceId = null;
 	}
 
 	toggleLayerVisibility(id: string): void {
@@ -1094,11 +1999,12 @@ export class EditorState {
 		this.dirty = true;
 		this.modified = true;
 		this.revision++;
+		this.layerAppearanceRevision++;
 	}
 
 	toggleLayerLock(id: string): void {
 		const layer = this.doc.layers.find((item) => item.id === id);
-		if (!layer) return;
+		if (!layer || layer.role === "reference") return;
 		layer.locked = !layer.locked;
 		this.dirty = true;
 		this.modified = true;
@@ -1114,15 +2020,18 @@ export class EditorState {
 	}
 
 	setLayerOpacity(id: string, opacity: number): void {
+		if (!Number.isFinite(opacity)) return;
 		const layer = this.doc.layers.find((item) => item.id === id);
 		if (!layer) return;
 		layer.opacity = clamp(opacity, 0, 1);
 		this.dirty = true;
 		this.modified = true;
 		this.revision++;
+		this.layerAppearanceRevision++;
 	}
 
 	addLayer(): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
 		this.pushHistory();
 		const layer = createLayer(
 			`Layer ${this.doc.layers.length + 1}`,
@@ -1132,10 +2041,12 @@ export class EditorState {
 		);
 		this.doc.layers.push(layer);
 		this.activeLayerId = layer.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
 	duplicateLayer(): void {
+		if (this.doc.layers.length >= MAX_PROJECT_LAYERS) return;
 		const source = this.activeLayer;
 		if (!source) return;
 		this.pushHistory();
@@ -1143,13 +2054,15 @@ export class EditorState {
 			id: uid("layer"),
 			name: `${source.name} copy`,
 			visible: source.visible,
-			locked: false,
+			locked: source.role === "reference",
 			opacity: source.opacity,
 			cels: source.cels.map((cel) => new Uint32Array(cel)),
+			...(source.role ? { role: source.role } : {}),
 		};
 		const index = this.doc.layers.findIndex((layer) => layer.id === source.id);
 		this.doc.layers.splice(index + 1, 0, copy);
 		this.activeLayerId = copy.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1163,6 +2076,7 @@ export class EditorState {
 		this.doc.layers.splice(index, 1);
 		this.activeLayerId =
 			this.doc.layers[Math.min(index, this.doc.layers.length - 1)]!.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1174,6 +2088,7 @@ export class EditorState {
 		this.pushHistory();
 		const [layer] = this.doc.layers.splice(index, 1);
 		this.doc.layers.splice(index + 1, 0, layer!);
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1185,6 +2100,7 @@ export class EditorState {
 		this.pushHistory();
 		const [layer] = this.doc.layers.splice(index, 1);
 		this.doc.layers.splice(index - 1, 0, layer!);
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1215,7 +2131,7 @@ export class EditorState {
 		}
 		if (!changed) return;
 
-		this.pushHistory();
+		this.pushHistoryCel(layer.id, this.activeFrame);
 		for (let i = 0; i < cel.length; i++) {
 			if (mask[i]) cel[i] = 0;
 		}
@@ -1224,19 +2140,26 @@ export class EditorState {
 
 	clearLayer(): void {
 		const layer = this.activeLayer;
-		if (!layer) return;
-		this.pushHistory();
+		if (!layer || layer.role === "reference") return;
+		this.pushHistoryCel(layer.id, this.activeFrame);
 		const cel = layer.cels[this.activeFrame];
 		if (cel) this.#clearCel(cel);
 		this.revision++;
 	}
 
 	clearFrame(): void {
-		this.pushHistory();
-		for (const layer of this.doc.layers) {
-			const cel = layer.cels[this.activeFrame];
+		const frame = this.activeFrame;
+		const editableLayers = this.doc.layers.filter(
+			(layer) => layer.role !== "reference",
+		);
+		this.pushHistoryCels(
+			editableLayers.map((layer) => ({ layerId: layer.id, frame })),
+		);
+		for (const layer of editableLayers) {
+			const cel = layer.cels[frame];
 			if (cel) this.#clearCel(cel);
 		}
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1251,11 +2174,265 @@ export class EditorState {
 		}
 	}
 
-	selectFrame(index: number): void {
-		const next = clamp(index, 0, this.doc.frames.length - 1);
-		if (next === this.activeFrame) return;
+	/** Tight bounds of painted pixels across all frames and normal layers. */
+	findContentBounds(): PixelBounds | null {
+		return contentBoundsOf(this.doc);
+	}
+
+	/** Bounds of the current pixel selection, or null when nothing is selected. */
+	selectionCropBounds(): PixelBounds | null {
+		return selectionBounds(this.selection, this.doc.width, this.doc.height);
+	}
+
+	#applyCanvasTransform(
+		width: number,
+		height: number,
+		transform: (cel: Uint32Array) => Uint32Array,
+	): void {
+		this.pushHistory();
+		for (const layer of this.doc.layers) {
+			layer.cels = layer.cels.map((cel) => transform(cel));
+		}
+		this.doc.width = width;
+		this.doc.height = height;
+		// The old mask and floating content no longer match the document size.
+		this.selection = null;
+		this.selectionRevision++;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Resamples every cel to the new dimensions with nearest-neighbor scaling. */
+	scaleCanvas(width: number, height: number): boolean {
+		const nextWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		const nextHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
+			return false;
+		}
+
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		this.#applyCanvasTransform(nextWidth, nextHeight, (cel) =>
+			scalePixelsNearest(cel, oldWidth, oldHeight, nextWidth, nextHeight),
+		);
+		return true;
+	}
+
+	/**
+	 * Grows or crops every cel around an anchor. Anchor values are 0, 0.5, or 1
+	 * on each axis. New pixels are transparent.
+	 */
+	resizeCanvas(
+		width: number,
+		height: number,
+		anchorX = 0.5,
+		anchorY = 0.5,
+	): boolean {
+		const nextWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		const nextHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
+			return false;
+		}
+
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		const offsetX = Math.round(
+			(nextWidth - oldWidth) * clamp(anchorX, 0, 1),
+		);
+		const offsetY = Math.round(
+			(nextHeight - oldHeight) * clamp(anchorY, 0, 1),
+		);
+		this.#applyCanvasTransform(nextWidth, nextHeight, (cel) =>
+			resizePixels(
+				cel,
+				oldWidth,
+				oldHeight,
+				nextWidth,
+				nextHeight,
+				offsetX,
+				offsetY,
+			),
+		);
+		return true;
+	}
+
+	/** Crops every cel to an explicit rectangle in the current canvas. */
+	cropCanvasTo(
+		x: number,
+		y: number,
+		width: number,
+		height: number,
+	): boolean {
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		const cropX = clamp(
+			Number.isFinite(x) ? Math.round(x) : 0,
+			0,
+			oldWidth - 1,
+		);
+		const cropY = clamp(
+			Number.isFinite(y) ? Math.round(y) : 0,
+			0,
+			oldHeight - 1,
+		);
+		const cropWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : 1,
+			1,
+			oldWidth - cropX,
+		);
+		const cropHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : 1,
+			1,
+			oldHeight - cropY,
+		);
+		if (
+			cropX === 0 &&
+			cropY === 0 &&
+			cropWidth === oldWidth &&
+			cropHeight === oldHeight
+		) {
+			return false;
+		}
+
+		this.#applyCanvasTransform(cropWidth, cropHeight, (cel) =>
+			resizePixels(
+				cel,
+				oldWidth,
+				oldHeight,
+				cropWidth,
+				cropHeight,
+				-cropX,
+				-cropY,
+			),
+		);
+		return true;
+	}
+
+	/** Trims transparent borders around all painted content. */
+	cropToContent(): boolean {
+		const bounds = this.findContentBounds();
+		if (!bounds) return false;
+		return this.cropCanvasTo(
+			bounds.x,
+			bounds.y,
+			bounds.width,
+			bounds.height,
+		);
+	}
+
+	/** Crops to the smallest rectangle containing the selected pixels. */
+	cropToSelection(): boolean {
+		const bounds = this.selectionCropBounds();
+		if (!bounds) return false;
+		return this.cropCanvasTo(
+			bounds.x,
+			bounds.y,
+			bounds.width,
+			bounds.height,
+		);
+	}
+
+	selectFrame(
+		index: number,
+		options: { extend?: boolean; preserveSelection?: boolean } = {},
+	): void {
+		const next = clamp(Math.round(index), 0, this.doc.frames.length - 1);
+		const nextId = this.doc.frames[next]!.id;
 		if (this.floating) this.commitFloatingSelection();
+
+		if (options.extend) {
+			const anchorIndex = this.#frameAnchorId
+				? this.doc.frames.findIndex(
+						(frame) => frame.id === this.#frameAnchorId,
+					)
+				: this.activeFrame;
+			const from = anchorIndex >= 0 ? anchorIndex : this.activeFrame;
+			const start = Math.min(from, next);
+			const end = Math.max(from, next);
+			this.activeFrame = next;
+			this.frameSelection = this.doc.frames
+				.slice(start, end + 1)
+				.map((frame) => frame.id);
+			return;
+		}
+
+		if (options.preserveSelection) {
+			this.activeFrame = next;
+			return;
+		}
+
+		if (
+			next === this.activeFrame &&
+			this.frameSelection.length === 1 &&
+			this.frameSelection[0] === nextId
+		) {
+			return;
+		}
 		this.activeFrame = next;
+		this.frameSelection = [nextId];
+		this.#frameAnchorId = nextId;
+	}
+
+	selectFrameRange(start: number, end: number): void {
+		const last = this.doc.frames.length - 1;
+		const a = clamp(Math.round(start), 0, last);
+		const b = clamp(Math.round(end), 0, last);
+		const from = Math.min(a, b);
+		const to = Math.max(a, b);
+		if (this.floating) this.commitFloatingSelection();
+		this.activeFrame = b;
+		this.frameSelection = this.doc.frames
+			.slice(from, to + 1)
+			.map((frame) => frame.id);
+		this.#frameAnchorId = this.doc.frames[from]!.id;
+	}
+
+	toggleFrameSelection(index: number): void {
+		const next = clamp(Math.round(index), 0, this.doc.frames.length - 1);
+		const id = this.doc.frames[next]!.id;
+		if (this.floating) this.commitFloatingSelection();
+
+		if (this.frameSelection.includes(id)) {
+			if (this.selectedFrameIndices.length <= 1) return;
+			this.frameSelection = this.frameSelection.filter(
+				(frameId) => frameId !== id,
+			);
+			const remaining = this.selectedFrameIndices;
+			this.activeFrame = remaining[remaining.length - 1] ?? 0;
+			this.#frameAnchorId =
+				this.doc.frames[this.activeFrame]?.id ?? null;
+			return;
+		}
+
+		this.frameSelection = [...this.frameSelection, id];
+		this.activeFrame = next;
+		this.#frameAnchorId = id;
+	}
+
+	selectAllFrames(): void {
+		this.frameSelection = this.doc.frames.map((frame) => frame.id);
+		this.#frameAnchorId = this.doc.frames[0]?.id ?? null;
+	}
+
+	isFrameSelected(index: number): boolean {
+		const frame = this.doc.frames[index];
+		return !!frame && this.frameSelection.includes(frame.id);
 	}
 
 	nextFrame(): void {
@@ -1268,39 +2445,429 @@ export class EditorState {
 		);
 	}
 
-	addFrame(): void {
-		this.pushHistory();
-		const index = this.activeFrame + 1;
-		this.doc.frames.splice(index, 0, { id: uid("frame") });
-		for (const layer of this.doc.layers) {
-			layer.cels.splice(index, 0, new Uint32Array(this.doc.width * this.doc.height));
+	frameDurationAt(index: number = this.activeFrame): number {
+		return frameDurationMs(this.doc, index);
+	}
+
+	#shiftFramePixels(
+		source: Uint32Array,
+		dx: number,
+		dy: number,
+	): Uint32Array {
+		const width = this.doc.width;
+		const height = this.doc.height;
+		const output = new Uint32Array(width * height);
+		if (dx === 0 && dy === 0) {
+			output.set(source);
+			return output;
 		}
-		this.activeFrame = index;
+		for (let y = 0; y < height; y++) {
+			const targetY = y + dy;
+			if (targetY < 0 || targetY >= height) continue;
+			for (let x = 0; x < width; x++) {
+				const targetX = x + dx;
+				if (targetX < 0 || targetX >= width) continue;
+				output[targetY * width + targetX] = source[y * width + x]!;
+			}
+		}
+		return output;
+	}
+
+	#shiftLoopForInsert(index: number, count: number): void {
+		if (!this.hasLoopRange) return;
+		const start = this.doc.loopStart ?? 0;
+		const end = this.doc.loopEnd ?? this.doc.frames.length - 1;
+		if (index <= start) {
+			this.doc.loopStart = start + count;
+			this.doc.loopEnd = end + count;
+		} else if (index <= end) {
+			this.doc.loopEnd = end + count;
+		}
+	}
+
+	#shiftLoopForDelete(indices: readonly number[]): void {
+		if (!this.hasLoopRange) return;
+		const start = this.doc.loopStart ?? 0;
+		const end = this.doc.loopEnd ?? this.doc.frames.length - 1;
+		let before = 0;
+		let within = 0;
+		for (const index of indices) {
+			if (index < start) before++;
+			else if (index <= end) within++;
+		}
+		if (before === 0 && within === 0) return;
+		const nextStart = start - before;
+		const nextEnd = end - before - within;
+		if (nextEnd < nextStart) {
+			this.doc.loopStart = undefined;
+			this.doc.loopEnd = undefined;
+		} else {
+			this.doc.loopStart = nextStart;
+			this.doc.loopEnd = nextEnd;
+		}
+	}
+
+	copyFrames(): boolean {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return false;
+
+		this.#frameClipboard = {
+			frames: indices.map((index) => {
+				const frame = this.doc.frames[index]!;
+				const cels = new Map<string, Uint32Array>();
+				for (const layer of this.doc.layers) {
+					const cel = layer.cels[index];
+					if (cel) cels.set(layer.id, new Uint32Array(cel));
+				}
+				return {
+					...(frame.duration !== undefined
+						? { duration: frame.duration }
+						: {}),
+					...(frame.tag ? { tag: frame.tag } : {}),
+					cels,
+				};
+			}),
+		};
+		this.hasFrameClipboard = true;
+		return true;
+	}
+
+	pasteFrames(): boolean {
+		const clipboard = this.#frameClipboard;
+		if (!clipboard || clipboard.frames.length === 0) return false;
+		if (
+			this.doc.frames.length + clipboard.frames.length >
+			MAX_PROJECT_FRAMES
+		) {
+			return false;
+		}
+
+		const selected = this.selectedFrameIndices;
+		const insertAt =
+			(selected.length > 0
+				? selected[selected.length - 1]!
+				: this.activeFrame) + 1;
+		const width = this.doc.width;
+		const height = this.doc.height;
+
+		this.pushHistory();
+		this.#shiftLoopForInsert(insertAt, clipboard.frames.length);
+		const pasted: Frame[] = [];
+		for (const [offset, source] of clipboard.frames.entries()) {
+			const target = insertAt + offset;
+			const frame: Frame = {
+				id: uid("frame"),
+				...(source.duration !== undefined
+					? { duration: source.duration }
+					: {}),
+				...(source.tag ? { tag: source.tag } : {}),
+			};
+			pasted.push(frame);
+			this.doc.frames.splice(target, 0, frame);
+			for (const layer of this.doc.layers) {
+				const sourceCel = source.cels.get(layer.id);
+				layer.cels.splice(
+					target,
+					0,
+					sourceCel
+						? new Uint32Array(sourceCel)
+						: new Uint32Array(width * height),
+				);
+			}
+		}
+
+		this.activeFrame = insertAt;
+		this.frameSelection = pasted.map((frame) => frame.id);
+		this.#frameAnchorId = pasted[0]!.id;
+		this.structureRevision++;
 		this.revision++;
+		return true;
 	}
 
 	duplicateFrame(): void {
-		this.pushHistory();
-		const index = this.activeFrame;
-		this.doc.frames.splice(index + 1, 0, { id: uid("frame") });
-		for (const layer of this.doc.layers) {
-			const source =
-				layer.cels[index] ?? new Uint32Array(this.doc.width * this.doc.height);
-			layer.cels.splice(index + 1, 0, new Uint32Array(source));
+		this.duplicateFrames(0, 0);
+	}
+
+	duplicateFrames(
+		offsetX = 0,
+		offsetY = 0,
+	): boolean {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return false;
+		if (
+			this.doc.frames.length + indices.length >
+			MAX_PROJECT_FRAMES
+		) {
+			return false;
 		}
-		this.activeFrame = index + 1;
+
+		const insertAt = indices[indices.length - 1]! + 1;
+		const dx = Number.isFinite(offsetX) ? Math.round(offsetX) : 0;
+		const dy = Number.isFinite(offsetY) ? Math.round(offsetY) : 0;
+
+		this.pushHistory();
+		this.#shiftLoopForInsert(insertAt, indices.length);
+		const duplicated: Frame[] = [];
+		for (const [offset, sourceIndex] of indices.entries()) {
+			const source = this.doc.frames[sourceIndex]!;
+			const target = insertAt + offset;
+			const frame: Frame = {
+				id: uid("frame"),
+				...(source.duration !== undefined
+					? { duration: source.duration }
+					: {}),
+				...(source.tag ? { tag: source.tag } : {}),
+			};
+			duplicated.push(frame);
+			this.doc.frames.splice(target, 0, frame);
+			for (const layer of this.doc.layers) {
+				const sourceCel = layer.cels[sourceIndex];
+				layer.cels.splice(
+					target,
+					0,
+					sourceCel
+						? this.#shiftFramePixels(sourceCel, dx, dy)
+						: new Uint32Array(this.doc.width * this.doc.height),
+				);
+			}
+		}
+
+		this.activeFrame = insertAt;
+		this.frameSelection = duplicated.map((frame) => frame.id);
+		this.#frameAnchorId = duplicated[0]!.id;
+		this.structureRevision++;
 		this.revision++;
+		return true;
 	}
 
 	deleteFrame(): void {
-		if (this.doc.frames.length <= 1) return;
+		this.deleteSelectedFrames();
+	}
+
+	deleteSelectedFrames(): void {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return;
+		if (indices.length >= this.doc.frames.length) return;
+
+		const activeId = this.doc.frames[this.activeFrame]?.id;
 		this.pushHistory();
-		const index = this.activeFrame;
-		this.doc.frames.splice(index, 1);
-		for (const layer of this.doc.layers) {
-			layer.cels.splice(index, 1);
+		this.#shiftLoopForDelete(indices);
+		for (let position = indices.length - 1; position >= 0; position--) {
+			const index = indices[position]!;
+			this.doc.frames.splice(index, 1);
+			for (const layer of this.doc.layers) {
+				layer.cels.splice(index, 1);
+			}
 		}
-		this.activeFrame = clamp(index, 0, this.doc.frames.length - 1);
+
+		const nextIndex = clamp(indices[0]!, 0, this.doc.frames.length - 1);
+		this.activeFrame =
+			activeId && !indices.includes(this.activeFrame)
+				? clamp(
+						this.doc.frames.findIndex((frame) => frame.id === activeId),
+						0,
+						this.doc.frames.length - 1,
+					)
+				: nextIndex;
+		const frame = this.doc.frames[this.activeFrame]!;
+		this.frameSelection = [frame.id];
+		this.#frameAnchorId = frame.id;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	moveSelectedFrames(direction: -1 | 1): void {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return;
+		if (direction < 0) {
+			const first = indices[0]!;
+			if (first <= 0) return;
+			this.moveFramesTo(first - 1);
+		} else {
+			const last = indices[indices.length - 1]!;
+			if (last >= this.doc.frames.length - 1) return;
+			this.moveFramesTo(last + 2);
+		}
+	}
+
+	/**
+	 * Moves the selected frames so they are inserted before `targetIndex`.
+	 * Frames and every layer's cels move together.
+	 */
+	moveFramesTo(targetIndex: number, frameIds: readonly string[] = this.frameSelection): void {
+		const count = this.doc.frames.length;
+		const selectedSet = new Set(frameIds);
+		const selectedIndices: number[] = [];
+		this.doc.frames.forEach((frame, index) => {
+			if (selectedSet.has(frame.id)) selectedIndices.push(index);
+		});
+		if (selectedIndices.length === 0 || selectedIndices.length >= count) {
+			return;
+		}
+
+		let insertion = clamp(Math.round(targetIndex), 0, count);
+		for (const index of selectedIndices) {
+			if (index < insertion) insertion--;
+		}
+		insertion = clamp(insertion, 0, count - selectedIndices.length);
+
+		const order: number[] = [];
+		for (let index = 0; index < count; index++) {
+			if (!selectedIndices.includes(index)) order.push(index);
+		}
+		for (const [offset, index] of selectedIndices.entries()) {
+			order.splice(insertion + offset, 0, index);
+		}
+		if (order.every((value, index) => value === index)) return;
+
+		const activeId = this.doc.frames[this.activeFrame]!.id;
+		this.pushHistory();
+
+		const frames = this.doc.frames.slice();
+		this.doc.frames.splice(
+			0,
+			this.doc.frames.length,
+			...order.map((index) => frames[index]!),
+		);
+		for (const layer of this.doc.layers) {
+			const cels = layer.cels.slice();
+			layer.cels.splice(
+				0,
+				layer.cels.length,
+				...order.map((index) => cels[index]!),
+			);
+		}
+
+		this.activeFrame = clamp(
+			this.doc.frames.findIndex((frame) => frame.id === activeId),
+			0,
+			this.doc.frames.length - 1,
+		);
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	setFrameDuration(duration: number | null): void {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return;
+		const value =
+			duration === null || !Number.isFinite(duration)
+				? undefined
+				: clamp(
+						Math.round(duration),
+						MIN_FRAME_DURATION,
+						MAX_FRAME_DURATION,
+					);
+		if (indices.every((index) => this.doc.frames[index]!.duration === value)) {
+			return;
+		}
+		this.pushHistory();
+		for (const index of indices) {
+			this.doc.frames[index]!.duration = value;
+		}
+	}
+
+	setFrameTag(tag: string): void {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return;
+		const trimmed = tag.trim().slice(0, 40);
+		const value = trimmed || undefined;
+		if (
+			indices.every(
+				(index) => (this.doc.frames[index]!.tag || undefined) === value,
+			)
+		) {
+			return;
+		}
+		this.pushHistory();
+		for (const index of indices) {
+			this.doc.frames[index]!.tag = value;
+		}
+	}
+
+	setLoopRange(start: number, end: number): void {
+		const last = this.doc.frames.length - 1;
+		const a = clamp(Math.round(start), 0, last);
+		const b = clamp(Math.round(end), 0, last);
+		const nextStart = Math.min(a, b);
+		const nextEnd = Math.max(a, b);
+		if (
+			this.doc.loopStart === nextStart &&
+			this.doc.loopEnd === nextEnd
+		) {
+			return;
+		}
+		this.pushHistory();
+		if (nextStart === 0 && nextEnd === last) {
+			this.doc.loopStart = undefined;
+			this.doc.loopEnd = undefined;
+		} else {
+			this.doc.loopStart = nextStart;
+			this.doc.loopEnd = nextEnd;
+		}
+	}
+
+	setLoopStartAt(index: number): void {
+		const range = loopRangeOf(this.doc);
+		const start = clamp(Math.round(index), 0, this.doc.frames.length - 1);
+		this.setLoopRange(start, Math.max(start, range.end));
+	}
+
+	setLoopEndAt(index: number): void {
+		const range = loopRangeOf(this.doc);
+		const end = clamp(Math.round(index), 0, this.doc.frames.length - 1);
+		this.setLoopRange(Math.min(range.start, end), end);
+	}
+
+	setLoopRangeToSelection(): void {
+		const indices = this.selectedFrameIndices;
+		if (indices.length === 0) return;
+		this.setLoopRange(indices[0]!, indices[indices.length - 1]!);
+	}
+
+	clearLoopRange(): void {
+		if (!this.hasLoopRange) return;
+		this.pushHistory();
+		this.doc.loopStart = undefined;
+		this.doc.loopEnd = undefined;
+	}
+
+	nextPlaybackFrame(): number {
+		const range = loopRangeOf(this.doc);
+		const current = this.activeFrame;
+		if (current < range.start || current >= range.end) return range.start;
+		return current + 1;
+	}
+
+	addFrame(): void {
+		if (this.doc.frames.length >= MAX_PROJECT_FRAMES) return;
+		this.pushHistory();
+		const index = this.activeFrame + 1;
+		const sourceFrame = this.doc.frames[this.activeFrame]!;
+		const frame: Frame = {
+			id: uid("frame"),
+			...(sourceFrame.duration !== undefined
+				? { duration: sourceFrame.duration }
+				: {}),
+		};
+		this.#shiftLoopForInsert(index, 1);
+		this.doc.frames.splice(index, 0, frame);
+		for (const layer of this.doc.layers) {
+			// A static reference should stay visible on a newly inserted frame.
+			const source =
+				layer.role === "reference" ? layer.cels[this.activeFrame] : undefined;
+			layer.cels.splice(
+				index,
+				0,
+				source
+					? new Uint32Array(source)
+					: new Uint32Array(this.doc.width * this.doc.height),
+			);
+		}
+		this.activeFrame = index;
+		this.frameSelection = [frame.id];
+		this.#frameAnchorId = frame.id;
+		this.structureRevision++;
 		this.revision++;
 	}
 
@@ -1311,8 +2878,43 @@ export class EditorState {
 		this.modified = true;
 	}
 
+	toggleOnion(): void {
+		this.onionEnabled = !this.onionEnabled;
+	}
+
+	setOnionRange(value: number): void {
+		if (!Number.isFinite(value)) return;
+		this.onionRange = clamp(Math.round(value), 1, 3);
+	}
+
+	setOnionOpacity(value: number): void {
+		if (!Number.isFinite(value)) return;
+		this.onionOpacity = clamp(value, 0.05, 1);
+	}
+
+	setOnionTint(direction: "previous" | "next", hex: string): void {
+		const color = normalizeHex(hex);
+		if (!color) return;
+		if (direction === "previous") this.onionTintPrevious = color;
+		else this.onionTintNext = color;
+	}
+
 	togglePlayback(): void {
-		this.playing = !this.playing;
+		if (this.playing) {
+			this.playing = false;
+			const activeId = this.doc.frames[this.activeFrame]?.id;
+			if (activeId && !this.frameSelection.includes(activeId)) {
+				this.frameSelection = [activeId];
+				this.#frameAnchorId = activeId;
+			}
+			return;
+		}
+
+		const range = loopRangeOf(this.doc);
+		if (this.activeFrame < range.start || this.activeFrame > range.end) {
+			this.selectFrame(range.start, { preserveSelection: true });
+		}
+		this.playing = true;
 	}
 }
 

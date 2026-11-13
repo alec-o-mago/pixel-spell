@@ -11,12 +11,13 @@
 	import { Label } from "$lib/components/ui/label/index.js";
 	import { Slider } from "$lib/components/ui/slider/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
-	import { compositeFrame } from "$lib/editor/doc.js";
+	import { compositeFrameCached, frameDurationMs } from "$lib/editor/doc.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import {
 		EXPORT_FORMATS,
 		EXPORT_TAB_LABELS,
 		FORMAT_EXTENSION,
+		animationFrameIndices,
 		downloadBlob,
 		exportBaseName,
 		exportFileName,
@@ -31,7 +32,7 @@
 		type ExportTabId,
 		type SheetLayout,
 	} from "$lib/editor/export.js";
-	import { drawScaled, pixelsToImageData } from "$lib/editor/render.js";
+	import { drawPixels, drawScaled } from "$lib/editor/render.js";
 	import { cn } from "$lib/utils.js";
 
 	let { open = $bindable(false) } = $props();
@@ -76,6 +77,7 @@
 	let gifScale = $state(1);
 	let gifFps = $state(12);
 	let gifLoop = $state(true);
+	let gifUseLoopRange = $state(true);
 	let gifBackground = $state<ExportBackground>("transparent");
 	let gifFileName = $state("");
 
@@ -99,8 +101,12 @@
 
 	let gifWidth = $derived(editor.doc.width * gifScale);
 	let gifHeight = $derived(editor.doc.height * gifScale);
+	let gifFrames = $derived(
+		animationFrameIndices(editor.doc, gifUseLoopRange),
+	);
+	let gifFrameCount = $derived(gifFrames.length);
 	let gifSizeError = $derived(
-		validateExportSize(gifWidth, gifHeight, editor.doc.frames.length, true),
+		validateExportSize(gifWidth, gifHeight, gifFrameCount, true),
 	);
 
 	let sizeError = $derived(
@@ -116,8 +122,7 @@
 		if (activeTab === "spritesheet") {
 			return `${sheetGeometry.width} × ${sheetGeometry.height} px · ${sheetGeometry.columns} × ${sheetGeometry.rows}`;
 		}
-		const frames = editor.doc.frames.length;
-		return `${gifWidth} × ${gifHeight} px · ${frames} ${frames === 1 ? "frame" : "frames"}`;
+		return `${gifWidth} × ${gifHeight} px · ${gifFrameCount} ${gifFrameCount === 1 ? "frame" : "frames"}`;
 	});
 
 	let formatLabel = $derived.by(() => {
@@ -130,7 +135,12 @@
 		if (activeTab === "spritesheet") {
 			return `${format(sheetFormat)} · ${sheetBackground}`;
 		}
-		return `GIF · ${Math.round(gifFps)} fps${gifLoop ? " · loop" : ""}`;
+		const range = editor.loopRange;
+		const rangeLabel =
+			gifUseLoopRange && editor.hasLoopRange
+				? ` · frames ${range.start + 1}–${range.end + 1}`
+				: "";
+		return `GIF · ${Math.round(gifFps)} fps fallback${gifLoop ? " · loop" : ""}${rangeLabel}`;
 	});
 
 	$effect(() => {
@@ -161,6 +171,7 @@
 			gifScale = 1;
 			gifFps = editor.doc.fps;
 			gifLoop = true;
+			gifUseLoopRange = editor.hasLoopRange;
 			gifBackground = "transparent";
 			gifFileName = `${exportBaseName(editor.name)}.gif`;
 
@@ -243,16 +254,13 @@
 		context.imageSmoothingEnabled = false;
 
 		const source = document.createElement("canvas");
-		source.width = doc.width;
-		source.height = doc.height;
-		const sourceContext = source.getContext("2d");
-		if (!sourceContext) return;
 
 		for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
-			sourceContext.putImageData(
-				pixelsToImageData(compositeFrame(doc, frameIndex), doc.width, doc.height),
-				0,
-				0,
+			drawPixels(
+				source,
+				compositeFrameCached(doc, frameIndex, editor.revision),
+				doc.width,
+				doc.height,
 			);
 			const column = frameIndex % geometry.columns;
 			const row = Math.floor(frameIndex / geometry.columns);
@@ -274,13 +282,16 @@
 		const tab = activeTab;
 
 		if (previewTimer !== undefined) {
-			window.clearInterval(previewTimer);
+			window.clearTimeout(previewTimer);
 			previewTimer = undefined;
 		}
 
 		if (tab === "image") {
 			const frame = Math.max(0, Math.min(imageFrame, doc.frames.length - 1));
-			const pixels = flattenPixels(compositeFrame(doc, frame), imageBackground);
+			const pixels = flattenPixels(
+				compositeFrameCached(doc, frame, editor.revision),
+				imageBackground,
+			);
 			drawPixelPreview(canvas, pixels, doc.width, doc.height);
 			return;
 		}
@@ -298,24 +309,35 @@
 			return;
 		}
 
-		const frameCount = Math.max(1, doc.frames.length);
-		let frameIndex = 0;
+		const frames = animationFrameIndices(doc, gifUseLoopRange);
+		// Track loop and per-frame timing changes so the preview restarts.
+		editor.doc.loopStart;
+		editor.doc.loopEnd;
+		doc.frames.map((frame) => frame.duration ?? 0).join(",");
+
+		let position = 0;
 		const draw = (): void => {
-			const frame = frameIndex % frameCount;
-			const pixels = flattenPixels(compositeFrame(doc, frame), gifBackground);
+			const frame = frames[position % frames.length]!;
+			const pixels = flattenPixels(
+				compositeFrameCached(doc, frame, editor.revision),
+				gifBackground,
+			);
 			drawPixelPreview(canvas, pixels, doc.width, doc.height);
-			frameIndex = (frameIndex + 1) % frameCount;
+			position = (position + 1) % frames.length;
+
+			if (frames.length <= 1) return;
+			const customDuration = doc.frames[frame]?.duration;
+			const duration =
+				customDuration !== undefined
+					? frameDurationMs(doc, frame)
+					: 1000 / Math.max(1, Math.min(60, Math.round(gifFps)));
+			previewTimer = window.setTimeout(draw, Math.max(10, duration));
 		};
 		draw();
 
-		if (frameCount > 1) {
-			const fps = Math.max(1, Math.min(60, Math.round(gifFps)));
-			previewTimer = window.setInterval(draw, 1000 / fps);
-		}
-
 		return () => {
 			if (previewTimer !== undefined) {
-				window.clearInterval(previewTimer);
+				window.clearTimeout(previewTimer);
 				previewTimer = undefined;
 			}
 		};
@@ -387,6 +409,7 @@
 					fps: gifFps,
 					loop: gifLoop,
 					background: gifBackground,
+					loopRange: gifUseLoopRange,
 				});
 				downloadBlob(exportFileName(gifFileName, "gif"), blob);
 			}
@@ -705,7 +728,7 @@
 
 				<div class="grid gap-2">
 					<div class="flex items-center justify-between">
-						<span class="text-xs font-medium">Frame rate</span>
+						<span class="text-xs font-medium">Fallback frame rate</span>
 						<span
 							class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground"
 						>
@@ -713,7 +736,25 @@
 						</span>
 					</div>
 					<Slider type="single" min={1} max={60} step={1} bind:value={gifFps} />
+					<p class="text-[10px] text-muted-foreground">
+						Frames with a custom duration use it; all other frames use this rate.
+					</p>
 				</div>
+
+				{#if editor.hasLoopRange}
+					<label
+						class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+					>
+						<span class="grid gap-0.5">
+							<span class="text-xs font-medium">Use loop range</span>
+							<span class="text-[10px] text-muted-foreground">
+								Export frames {editor.loopRange.start + 1}–{editor.loopRange.end + 1}
+								only.
+							</span>
+						</span>
+						<Switch bind:checked={gifUseLoopRange} />
+					</label>
+				{/if}
 
 				<label
 					class="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"

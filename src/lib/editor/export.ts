@@ -1,6 +1,6 @@
-import { compositeFrame } from "./doc.js";
+import { compositeFrame, frameDurationMs, loopRangeOf } from "./doc.js";
 import { fileBase } from "./file.js";
-import { pixelsToImageData } from "./render.js";
+import { drawPixels } from "./render.js";
 import type { PixelDoc } from "./types.js";
 
 export type ExportTabId = "image" | "spritesheet" | "gif";
@@ -33,6 +33,8 @@ export interface GifExportOptions {
 	fps: number;
 	loop: boolean;
 	background: ExportBackground;
+	/** Restrict the GIF to the document loop range when one is set. */
+	loopRange?: boolean;
 }
 
 export interface SheetGeometry {
@@ -102,7 +104,9 @@ export function downloadBlob(filename: string, blob: Blob): void {
 	link.href = url;
 	link.download = filename;
 	link.rel = "noopener";
+	document.body.appendChild(link);
 	link.click();
+	link.remove();
 	window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -133,6 +137,22 @@ export function getSheetGeometry(
 		width: cols * width + Math.max(0, cols - 1) * gap,
 		height: rows * height + Math.max(0, rows - 1) * gap,
 	};
+}
+
+/** Frame indices included in an animation export. */
+export function animationFrameIndices(
+	doc: PixelDoc,
+	useLoopRange = true,
+): number[] {
+	if (!useLoopRange) {
+		return Array.from({ length: doc.frames.length }, (_, index) => index);
+	}
+	const range = loopRangeOf(doc);
+	const indices: number[] = [];
+	for (let index = range.start; index <= range.end; index++) {
+		indices.push(index);
+	}
+	return indices.length > 0 ? indices : [0];
 }
 
 /** Returns a human-readable error when an export would exceed safe limits. */
@@ -193,14 +213,11 @@ export function flattenPixels(
 
 function createSourceCanvas(doc: PixelDoc, frameIndex: number): HTMLCanvasElement {
 	const canvas = document.createElement("canvas");
-	canvas.width = doc.width;
-	canvas.height = doc.height;
-	const context = canvas.getContext("2d");
-	if (!context) throw new Error("Canvas 2D is not available");
-	context.putImageData(
-		pixelsToImageData(compositeFrame(doc, frameIndex), doc.width, doc.height),
-		0,
-		0,
+	drawPixels(
+		canvas,
+		compositeFrame(doc, frameIndex),
+		doc.width,
+		doc.height,
 	);
 	return canvas;
 }
@@ -298,16 +315,13 @@ export async function exportSpriteSheet(
 	context.imageSmoothingEnabled = false;
 
 	const source = document.createElement("canvas");
-	source.width = doc.width;
-	source.height = doc.height;
-	const sourceContext = source.getContext("2d");
-	if (!sourceContext) throw new Error("Canvas 2D is not available");
 
 	for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
-		sourceContext.putImageData(
-			pixelsToImageData(compositeFrame(doc, frameIndex), doc.width, doc.height),
-			0,
-			0,
+		drawPixels(
+			source,
+			compositeFrame(doc, frameIndex),
+			doc.width,
+			doc.height,
 		);
 
 		const column = frameIndex % geometry.columns;
@@ -444,8 +458,9 @@ function medianCut(entries: ColorCount[], maxColors: number): ColorCount[] {
 }
 
 function collectGifColors(
-	doc: PixelDoc,
 	background: ExportBackground,
+	frameIndices: readonly number[],
+	getFrame: (frame: number) => Uint32Array,
 ): ColorCount[] {
 	let exact: Map<number, number> | null = new Map();
 	let buckets: Map<number, number> | null = null;
@@ -477,8 +492,8 @@ function collectGifColors(
 		}
 	};
 
-	for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
-		const pixels = compositeFrame(doc, frameIndex);
+	for (const frameIndex of frameIndices) {
+		const pixels = getFrame(frameIndex);
 		for (let index = 0; index < pixels.length; index++) {
 			const value = pixels[index]!;
 			const alpha = value >>> 24;
@@ -533,10 +548,14 @@ interface GifPalette {
 	lookup: Uint8Array;
 }
 
-function buildGifPalette(doc: PixelDoc, background: ExportBackground): GifPalette {
+function buildGifPalette(
+	background: ExportBackground,
+	frameIndices: readonly number[],
+	getFrame: (frame: number) => Uint32Array,
+): GifPalette {
 	const transparentIndex = background === "transparent" ? 0 : null;
 	const maxColors = transparentIndex === null ? 256 : 255;
-	const sourceColors = collectGifColors(doc, background);
+	const sourceColors = collectGifColors(background, frameIndices, getFrame);
 	const reduced =
 		sourceColors.length <= maxColors
 			? sourceColors
@@ -601,8 +620,9 @@ function buildFrameIndices(
 	scale: number,
 	background: ExportBackground,
 	palette: GifPalette,
+	getFrame: (frame: number) => Uint32Array,
 ): Uint8Array {
-	const pixels = compositeFrame(doc, frameIndex);
+	const pixels = getFrame(frameIndex);
 	const width = doc.width * scale;
 	const height = doc.height * scale;
 	const indices = new Uint8Array(width * height);
@@ -677,9 +697,8 @@ class ByteWriter {
 
 	writeBytes(bytes: ArrayLike<number>): void {
 		this.ensure(bytes.length);
-		for (let index = 0; index < bytes.length; index++) {
-			this.data[this.length++] = bytes[index]! & 0xff;
-		}
+		this.data.set(bytes, this.length);
+		this.length += bytes.length;
 	}
 
 	writeString(value: string): void {
@@ -795,11 +814,33 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 	const width = doc.width * scale;
 	const height = doc.height * scale;
 	const fps = clampInt(options.fps, 1, 60);
-	const delay = Math.max(2, Math.round(100 / fps));
 	const background = options.background;
-	const sizeError = validateExportSize(width, height, doc.frames.length, true);
+	const frameIndices = animationFrameIndices(doc, options.loopRange !== false);
+	const sizeError = validateExportSize(
+		width,
+		height,
+		frameIndices.length,
+		true,
+	);
 	if (sizeError) throw new Error(sizeError);
-	const palette = buildGifPalette(doc, background);
+
+	// Palette collection and index building both need every frame. Cache the
+	// composited frames when the document is small enough, avoiding a second
+	// full composite pass for typical sprites.
+	const frameCache =
+		doc.width * doc.height * frameIndices.length <= 16_000_000
+			? new Map<number, Uint32Array>()
+			: null;
+	const getFrame = (frame: number): Uint32Array => {
+		if (!frameCache) return compositeFrame(doc, frame);
+		const cached = frameCache.get(frame);
+		if (cached) return cached;
+		const pixels = compositeFrame(doc, frame);
+		frameCache.set(frame, pixels);
+		return pixels;
+	};
+
+	const palette = buildGifPalette(background, frameIndices, getFrame);
 
 	const writer = new ByteWriter();
 	writer.writeString("GIF89a");
@@ -830,7 +871,16 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 	const transparentFlag = palette.transparentIndex === null ? 0 : 1;
 	const disposal = palette.transparentIndex === null ? 1 : 2;
 
-	for (let frameIndex = 0; frameIndex < doc.frames.length; frameIndex++) {
+	for (const frameIndex of frameIndices) {
+		const customDuration = doc.frames[frameIndex]?.duration;
+		const duration =
+			customDuration !== undefined
+				? frameDurationMs(doc, frameIndex)
+				: 1000 / fps;
+		const delay = Math.max(
+			2,
+			Math.min(65535, Math.round(duration / 10)),
+		);
 		writer.writeBytes([
 			0x21,
 			0xf9,
@@ -849,7 +899,14 @@ export function exportGif(doc: PixelDoc, options: GifExportOptions): Blob {
 		writer.writeUint16(height);
 		writer.writeByte(0);
 
-		const indices = buildFrameIndices(doc, frameIndex, scale, background, palette);
+		const indices = buildFrameIndices(
+			doc,
+			frameIndex,
+			scale,
+			background,
+			palette,
+			getFrame,
+		);
 		const compressed = lzwEncode(indices, minCodeSize);
 		writer.writeByte(minCodeSize);
 		writeSubBlocks(writer, compressed);

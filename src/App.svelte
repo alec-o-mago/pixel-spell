@@ -1,17 +1,27 @@
 <script lang="ts">
+	import { onMount } from "svelte";
 	import FileUp from "@lucide/svelte/icons/file-up";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import AboutDialog from "$lib/components/editor/AboutDialog.svelte";
 	import ExportDialog from "$lib/components/editor/ExportDialog.svelte";
 	import ImportDialog from "$lib/components/editor/ImportDialog.svelte";
+	import RecoveryDialog from "$lib/components/editor/RecoveryDialog.svelte";
 	import TimelineDock from "$lib/components/editor/TimelineDock.svelte";
 	import CanvasStage from "$lib/components/editor/CanvasStage.svelte";
 	import LeftPanel from "$lib/components/editor/LeftPanel.svelte";
 	import MenuBar from "$lib/components/editor/MenuBar.svelte";
 	import NewDocumentDialog from "$lib/components/editor/NewDocumentDialog.svelte";
 	import ProjectTabs from "$lib/components/editor/ProjectTabs.svelte";
+	import ResizeCanvasDialog from "$lib/components/editor/ResizeCanvasDialog.svelte";
+	import ScaleCanvasDialog from "$lib/components/editor/ScaleCanvasDialog.svelte";
 	import ShortcutsDialog from "$lib/components/editor/ShortcutsDialog.svelte";
 	import ToolStrip from "$lib/components/editor/ToolStrip.svelte";
+	import {
+		AUTOSAVE_INTERVAL_MS,
+		clearAutosaves,
+		loadRecoveryProjects,
+		type RecoveredProject,
+	} from "$lib/editor/autosave.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import { IMPORT_ACCEPT } from "$lib/editor/import.js";
 	import { TOOL_SHIFT_SHORTCUTS, TOOL_SHORTCUTS } from "$lib/editor/tools.js";
@@ -21,10 +31,84 @@
 	let aboutOpen = $state(false);
 	let importDialogOpen = $state(false);
 	let exportDialogOpen = $state(false);
+	let scaleCanvasOpen = $state(false);
+	let resizeCanvasOpen = $state(false);
 	let importFile = $state<File | null>(null);
 	let importInput: HTMLInputElement | undefined;
 	let draggingFile = $state(false);
 	let dragDepth = 0;
+	let recoveryOpen = $state(false);
+	let recoveredProjects = $state<RecoveredProject[]>([]);
+	let initialProjectIds: string[] = [];
+
+	onMount(() => {
+		let disposed = false;
+		initialProjectIds = editor.projects.map((project) => project.id);
+
+		const autosaveTimer = window.setInterval(
+			() => editor.autosaveNow(),
+			AUTOSAVE_INTERVAL_MS,
+		);
+		const flushAutosave = (): void => editor.autosaveNow();
+		const flushWhenHidden = (): void => {
+			if (document.visibilityState === "hidden") editor.autosaveNow();
+		};
+
+		window.addEventListener("pagehide", flushAutosave);
+		document.addEventListener("visibilitychange", flushWhenHidden);
+
+		void loadRecoveryProjects().then((projects) => {
+			if (disposed || projects.length === 0) return;
+			recoveredProjects = projects;
+			recoveryOpen = true;
+		});
+
+		return () => {
+			disposed = true;
+			window.clearInterval(autosaveTimer);
+			window.removeEventListener("pagehide", flushAutosave);
+			document.removeEventListener("visibilitychange", flushWhenHidden);
+		};
+	});
+
+	async function restoreRecoveredProjects(): Promise<void> {
+		const recovered = recoveredProjects;
+		if (recovered.length === 0) {
+			recoveryOpen = false;
+			return;
+		}
+
+		const preferred =
+			recovered.find((entry) => entry.record.active) ?? recovered[0]!;
+		let preferredId: string | null = null;
+
+		for (const entry of recovered) {
+			const id = editor.openProject(entry.project, { dirty: true });
+			if (entry === preferred) preferredId = id;
+		}
+
+		// The untouched project from this launch is replaced by the recovery tabs.
+		for (const id of initialProjectIds) {
+			if (
+				editor.projects.some((project) => project.id === id) &&
+				!editor.isProjectModified(id)
+			) {
+				editor.closeProject(id);
+			}
+		}
+		if (preferredId) editor.selectProject(preferredId);
+
+		await clearAutosaves();
+		recoveryOpen = false;
+		recoveredProjects = [];
+		editor.autosaveAll();
+	}
+
+	async function discardRecoveredProjects(): Promise<void> {
+		recoveryOpen = false;
+		recoveredProjects = [];
+		await clearAutosaves();
+	}
 
 	function showImport(file: File): void {
 		importFile = file;
@@ -85,6 +169,16 @@
 		}
 	});
 
+	$effect(() => {
+		// Capture a recovery snapshot shortly after drawing pauses. The interval
+		// in onMount covers longer, continuous editing sessions.
+		editor.revision;
+		editor.structureRevision;
+		if (!editor.dirty) return;
+		const timer = window.setTimeout(() => editor.autosaveNow(), 1200);
+		return () => window.clearTimeout(timer);
+	});
+
 	const NON_TEXT_INPUT_TYPES = new Set([
 		"button",
 		"checkbox",
@@ -111,6 +205,23 @@
 
 	function handleKeydown(event: KeyboardEvent): void {
 		if (isTypingTarget(event.target)) return;
+
+		const element = event.target as HTMLElement | null;
+		// Let focused buttons and links handle Space/Enter themselves instead
+		// of also toggling playback or a tool.
+		if (
+			(element?.tagName === "BUTTON" || element?.tagName === "A") &&
+			(event.key === " " || event.key === "Enter")
+		) {
+			return;
+		}
+		// A dialog owns its own keyboard interactions.
+		if (
+			element instanceof Element &&
+			element.closest('[role="dialog"], [role="menu"]')
+		) {
+			return;
+		}
 
 		const modifier = event.ctrlKey || event.metaKey;
 		const key = event.key.toLowerCase();
@@ -155,11 +266,28 @@
 			return;
 		}
 
-		if (event.altKey) return;
+		if (event.altKey) {
+			if (event.key === "ArrowLeft") {
+				event.preventDefault();
+				editor.moveSelectedFrames(-1);
+				return;
+			}
+			if (event.key === "ArrowRight") {
+				event.preventDefault();
+				editor.moveSelectedFrames(1);
+				return;
+			}
+			return;
+		}
 
 		if (event.key === "Delete") {
 			event.preventDefault();
 			editor.deleteSelection();
+			return;
+		}
+
+		if (key === "o") {
+			editor.toggleOnion();
 			return;
 		}
 
@@ -185,6 +313,7 @@
 
 		if (event.key === " ") {
 			event.preventDefault();
+			if (event.repeat) return;
 			editor.togglePlayback();
 			return;
 		}
@@ -199,6 +328,7 @@
 		if (event.key === "Escape") {
 			editor.playing = false;
 			editor.clearSelection();
+			editor.clearReferenceSelection();
 		}
 	}
 </script>
@@ -211,6 +341,8 @@
 			onExport={() => (exportDialogOpen = true)}
 			onShortcuts={() => (shortcutsOpen = true)}
 			onAbout={() => (aboutOpen = true)}
+			onScaleCanvas={() => (scaleCanvasOpen = true)}
+			onResizeCanvas={() => (resizeCanvasOpen = true)}
 		/>
 
 		<div class="flex min-h-0 flex-1">
@@ -230,6 +362,14 @@
 	<AboutDialog bind:open={aboutOpen} />
 	<ImportDialog bind:open={importDialogOpen} file={importFile} />
 	<ExportDialog bind:open={exportDialogOpen} />
+	<ScaleCanvasDialog bind:open={scaleCanvasOpen} />
+	<ResizeCanvasDialog bind:open={resizeCanvasOpen} />
+	<RecoveryDialog
+		bind:open={recoveryOpen}
+		projects={recoveredProjects}
+		onRestore={restoreRecoveredProjects}
+		onDiscard={discardRecoveredProjects}
+	/>
 
 	{#if draggingFile}
 		<div

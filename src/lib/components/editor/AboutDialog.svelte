@@ -25,7 +25,7 @@
 		<div class="grid gap-4 py-2 text-sm text-muted-foreground">
 			<p>
 				Draw sprites, build layered artwork and animate frame by frame. Everything runs
-				in the browser and projects can be saved as portable JSON files.
+				in the browser and projects can be saved as portable Pixel Spell files.
 			</p>
 			<p>Made by Alec, the Wizard🧙‍♂️✨</p>
 			<p class="font-mono text-[10px] text-muted-foreground/80">Version 0.1.0</p>

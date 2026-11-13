@@ -40,14 +40,18 @@ export function selectionBounds(
 	let maxX = -1;
 	let maxY = -1;
 
+	// Native indexOf/lastIndexOf scan a whole row in optimized C++ instead of
+	// running the per-pixel loop in JavaScript.
 	for (let y = 0; y < height; y++) {
-		for (let x = 0; x < width; x++) {
-			if (!mask[y * width + x]) continue;
-			if (x < minX) minX = x;
-			if (x > maxX) maxX = x;
-			if (y < minY) minY = y;
-			if (y > maxY) maxY = y;
-		}
+		const rowStart = y * width;
+		const rowEnd = rowStart + width;
+		const first = mask.indexOf(1, rowStart);
+		if (first === -1 || first >= rowEnd) continue;
+		const last = mask.lastIndexOf(1, rowEnd - 1);
+		if (y < minY) minY = y;
+		if (y > maxY) maxY = y;
+		if (first - rowStart < minX) minX = first - rowStart;
+		if (last - rowStart > maxX) maxX = last - rowStart;
 	}
 
 	if (maxX < minX || maxY < minY) return null;
@@ -88,39 +92,37 @@ export function magicWandMask(
 
 	const target = pixels[y * width + x];
 	const visited = new Uint8Array(width * height);
-	const stack: number[] = [y * width + x];
-	const offsets = diagonal
-		? [
-				[-1, -1],
-				[0, -1],
-				[1, -1],
-				[-1, 0],
-				[1, 0],
-				[-1, 1],
-				[0, 1],
-				[1, 1],
-			]
-		: [
-				[0, -1],
-				[-1, 0],
-				[1, 0],
-				[0, 1],
-			];
+	// Queue each pixel at most once so the stack stays proportional to the
+	// current frontier instead of growing to several times the pixel count.
+	const stack: number[] = [];
+	const start = y * width + x;
+	stack.push(start);
+	visited[start] = 1;
+
+	const push = (nx: number, ny: number) => {
+		if (nx < 0 || nx >= width || ny < 0 || ny >= height) return;
+		const next = ny * width + nx;
+		if (visited[next]) return;
+		visited[next] = 1;
+		stack.push(next);
+	};
 
 	while (stack.length > 0) {
 		const index = stack.pop()!;
-		if (visited[index]) continue;
-		visited[index] = 1;
 		if (pixels[index] !== target) continue;
 
 		mask[index] = 1;
 		const px = index % width;
 		const py = (index - px) / width;
-		for (const [dx, dy] of offsets) {
-			const nx = px + dx;
-			const ny = py + dy;
-			if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
-			stack.push(ny * width + nx);
+		push(px, py - 1);
+		push(px - 1, py);
+		push(px + 1, py);
+		push(px, py + 1);
+		if (diagonal) {
+			push(px - 1, py - 1);
+			push(px + 1, py - 1);
+			push(px - 1, py + 1);
+			push(px + 1, py + 1);
 		}
 	}
 	return mask;

@@ -9,21 +9,86 @@ export function pixelsToImageData(
 	return image;
 }
 
+interface ScratchSource {
+	canvas: HTMLCanvasElement;
+	context: CanvasRenderingContext2D;
+	image: ImageData;
+	width: number;
+	height: number;
+}
+
+/**
+ * Reused 1:1 source canvas. Every render path is synchronous, so a single
+ * scratch surface avoids allocating a canvas + ImageData on every pointer move.
+ */
+let scratch: ScratchSource | null = null;
+
+function scratchSource(width: number, height: number): ScratchSource | null {
+	if (width <= 0 || height <= 0) return null;
+	if (!scratch || scratch.width !== width || scratch.height !== height) {
+		const canvas = document.createElement("canvas");
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext("2d");
+		if (!context) return null;
+		scratch = {
+			canvas,
+			context,
+			image: new ImageData(width, height),
+			width,
+			height,
+		};
+	}
+	return scratch;
+}
+
+function writeScratchPixels(
+	source: ScratchSource,
+	pixels: Uint32Array,
+	width: number,
+	height: number,
+): void {
+	new Uint32Array(source.image.data.buffer).set(
+		pixels.subarray(0, width * height),
+	);
+	source.context.putImageData(source.image, 0, 0);
+}
+
+/** Draws packed pixels into a canvas 1:1, reusing the scratch ImageData. */
+export function drawPixels(
+	canvas: HTMLCanvasElement,
+	pixels: Uint32Array,
+	width: number,
+	height: number,
+): void {
+	if (canvas.width !== width) canvas.width = width;
+	if (canvas.height !== height) canvas.height = height;
+	const context = canvas.getContext("2d");
+	if (!context) return;
+	const source = scratchSource(width, height);
+	if (!source) return;
+	new Uint32Array(source.image.data.buffer).set(
+		pixels.subarray(0, width * height),
+	);
+	// putImageData replaces every pixel, so no clear is needed.
+	context.putImageData(source.image, 0, 0);
+}
+
 function drawSource(
 	context: CanvasRenderingContext2D,
 	pixels: Uint32Array,
 	width: number,
 	height: number,
+	x = 0,
+	y = 0,
+	drawWidth = width,
+	drawHeight = height,
 ): void {
-	const source = document.createElement("canvas");
-	source.width = width;
-	source.height = height;
-	const sourceContext = source.getContext("2d");
-	if (!sourceContext) return;
-	sourceContext.putImageData(pixelsToImageData(pixels, width, height), 0, 0);
-
+	const source = scratchSource(width, height);
+	if (!source) return;
+	writeScratchPixels(source, pixels, width, height);
 	context.imageSmoothingEnabled = false;
-	context.drawImage(source, 0, 0);
+	context.drawImage(source.canvas, x, y, drawWidth, drawHeight);
 }
 
 /** Draws a document buffer into a canvas at a CSS size, accounting for DPR. */
@@ -75,16 +140,11 @@ export function drawThumbnail(
 	const drawWidth = width * scale;
 	const drawHeight = height * scale;
 
-	const source = document.createElement("canvas");
-	source.width = width;
-	source.height = height;
-	const sourceContext = source.getContext("2d");
-	if (!sourceContext) return;
-	sourceContext.putImageData(pixelsToImageData(pixels, width, height), 0, 0);
-
-	context.imageSmoothingEnabled = false;
-	context.drawImage(
-		source,
+	drawSource(
+		context,
+		pixels,
+		width,
+		height,
 		(size - drawWidth) / 2,
 		(size - drawHeight) / 2,
 		drawWidth,
