@@ -46,6 +46,7 @@ Key files:
 | `lib/editor/render.ts` | Canvas scaling and thumbnail rendering |
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | Project serialization, save helpers |
+| `lib/editor/autosave.ts` | IndexedDB crash-recovery snapshots |
 | `lib/editor/import.ts` | Image decoding, palette parsing, and import analysis |
 | `lib/editor/reference.ts` | Reference-layer fitting and reference-board placement helpers |
 | `lib/editor/export.ts` | Image, sprite sheet, and GIF export encoding |
@@ -193,11 +194,14 @@ Preserve these regions and their relative placement when making changes.
 - Opening a project file creates a new tab; saving applies to the active project only.
 - Image export uses `canvas.toBlob`; sprite sheets support horizontal, vertical, and grid layouts.
 - `editor.saveToFile()` triggers a browser download and clears the dirty flag.
+- Dirty projects are also serialized to IndexedDB by `autosave.ts` (database `pixel-spell-autosave`, store `projects`) so a crash can be recovered. `editor.autosaveNow()` snapshots the active tab; `#syncActiveProject` snapshots the outgoing tab on switch, and `autosaveAll()` covers inactive tabs after a restore. Saving or closing a dirty tab deletes its record. The recovery dialog parses the stored `PXSP` bytes and previews the active frame.
 
 ## Gotchas
 
 - Vite HMR re-evaluates the state module and resets the in-memory document. This is expected during development; do not treat it as a bug.
-- Project tabs are in-memory. A page reload starts with one new `Untitled` project; only explicit project saves persist work.
+- Project tabs are in-memory, but dirty tabs are mirrored to IndexedDB for crash recovery. A reload offers to restore them through `RecoveryDialog.svelte`; clean tabs are not autosaved.
+- Autosave work must never mark a project dirty or change its revision. Serialization comes from `serializeProject`, so it shares the project file limits and skips documents that cannot be encoded.
+- Recovery records are keyed by project tab id. Delete the record when a project is saved or closed, and clear all records when the user restores or discards. The restore path reopens tabs with `openProject(project, { dirty: true })`.
 - Always sync the active project before switching, creating, opening, or saving. The live top-level fields are not automatically mirrored into the inactive snapshot map.
 - The tab bar must use `projectName`/`isProjectDirty`/`isProjectModified`; the active tab's values are live, inactive tabs use stored metadata.
 - Closing the only never-modified project is a no-op; closing the last remaining project creates a new `Untitled` project.
@@ -226,6 +230,7 @@ Preserve these regions and their relative placement when making changes.
 - Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Import destinations work for images: project, layer, frame, reference layer, and reference board; palettes still import. Reference layers are locked and non-exported; board references are independent of frames/layers, can be moved outside the canvas, and are embedded in saved projects.
 - Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, and dirty state; closing a dirty project confirms first.
+- Autosave recovery survives a reload: a dirty project is offered with a preview, Restore reopens it as an unsaved tab, and Discard removes the snapshot. Saving a project removes its autosave.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.
 - New UI matches the existing modern shadcn aesthetic and respects the layout contract.

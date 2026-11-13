@@ -1,9 +1,15 @@
+import {
+	type AutosaveRecord,
+	deleteAutosave,
+	writeAutosave,
+} from "./autosave.js";
 import { isTransparent, normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import { cloneDoc, createDoc, createLayer, uid } from "./doc.js";
 import {
 	MAX_PROJECT_FRAMES,
 	MAX_PROJECT_LAYERS,
 	saveProjectFile,
+	serializeProject,
 	type LoadedProject,
 } from "./file.js";
 import {
@@ -934,6 +940,90 @@ export class EditorState {
 		this.modified = true;
 	}
 
+	#autosaveRecord(
+		id: string,
+		doc: PixelDoc,
+		name: string,
+		activeFrame: number,
+		activeLayerId: string,
+		active: boolean,
+		position: number,
+	): AutosaveRecord | null {
+		try {
+			return {
+				id,
+				name,
+				bytes: serializeProject(
+					doc,
+					this.activePalette.colors,
+					name,
+					activeFrame,
+					activeLayerId,
+				),
+				active,
+				position,
+				savedAt: Date.now(),
+			};
+		} catch {
+			// Documents that are too large for the project format remain fully
+			// editable; they simply cannot be written to the recovery store.
+			return null;
+		}
+	}
+
+	#autosaveActiveProject(active: boolean): void {
+		if (!this.dirty) return;
+		const record = this.#autosaveRecord(
+			this.activeProjectId,
+			this.doc,
+			this.name,
+			this.activeFrame,
+			this.activeLayerId,
+			active,
+			Math.max(
+				0,
+				this.projects.findIndex(
+					(project) => project.id === this.activeProjectId,
+				),
+			),
+		);
+		if (record) void writeAutosave(record);
+	}
+
+	/**
+	 * Writes a recovery snapshot for the active project. Autosaves are kept in
+	 * IndexedDB so unsaved tabs survive a crash or reload.
+	 */
+	autosaveNow(): void {
+		this.#autosaveActiveProject(true);
+	}
+
+	/**
+	 * Writes a snapshot for every dirty tab, including inactive ones. Used after
+	 * restoring a workspace so a second crash cannot drop the other tabs.
+	 */
+	autosaveAll(): void {
+		this.#autosaveActiveProject(true);
+		for (const project of this.projects) {
+			if (project.id === this.activeProjectId) continue;
+			const snapshot = this.#states.get(project.id);
+			if (!snapshot || !project.dirty) continue;
+			const record = this.#autosaveRecord(
+				project.id,
+				snapshot.doc,
+				project.name,
+				snapshot.activeFrame,
+				snapshot.activeLayerId,
+				false,
+				Math.max(
+					0,
+					this.projects.findIndex((item) => item.id === project.id),
+				),
+			);
+			if (record) void writeAutosave(record);
+		}
+	}
+
 	#entryBytes(entry: HistoryEntry): number {
 		if (entry.kind === "cels") {
 			let bytes = 0;
@@ -1122,6 +1212,11 @@ export class EditorState {
 		const snapshot = this.#states.get(this.activeProjectId);
 		if (!tab || !snapshot) return;
 
+		// Persist the outgoing tab before its live fields are replaced. This is
+		// skipped when the tab was already removed (for example, when closing
+		// the last project), so a discarded autosave cannot be resurrected.
+		this.#autosaveActiveProject(false);
+
 		tab.name = this.name;
 		tab.dirty = this.dirty;
 		tab.modified = this.modified;
@@ -1214,6 +1309,8 @@ export class EditorState {
 		const wasActive = id === this.activeProjectId;
 		this.projects.splice(index, 1);
 		this.#states.delete(id);
+		// Closing without saving explicitly discards the recoverable work.
+		void deleteAutosave(id);
 
 		if (this.projects.length === 0) {
 			this.newProject(32, 32);
@@ -1260,7 +1357,10 @@ export class EditorState {
 		this.#activateProject(id);
 	}
 
-	openProject(project: LoadedProject): void {
+	openProject(
+		project: LoadedProject,
+		options: { dirty?: boolean } = {},
+	): string {
 		const doc = project.doc;
 		const activeLayerId = doc.layers.some((layer) => layer.id === project.activeLayerId)
 			? project.activeLayerId
@@ -1285,8 +1385,14 @@ export class EditorState {
 			undoBytes: 0,
 			redoBytes: 0,
 		});
-		this.projects.push({ id, name, dirty: false, modified: true });
+		this.projects.push({
+			id,
+			name,
+			dirty: options.dirty === true,
+			modified: true,
+		});
 		this.#activateProject(id);
+		return id;
 	}
 
 	/** Creates a new, unsaved project tab from an imported image. */
@@ -1673,6 +1779,8 @@ export class EditorState {
 	markSaved(): void {
 		this.dirty = false;
 		this.modified = true;
+		// A saved project no longer needs a crash-recovery snapshot.
+		void deleteAutosave(this.activeProjectId);
 		this.#syncActiveProject();
 	}
 

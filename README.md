@@ -21,6 +21,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **History** — 80-step undo/redo stack per project, with keyboard shortcuts.
 - **Export** — one dialog for image, sprite sheet, and GIF output. Export the current or chosen frame as PNG, WebP, or JPEG; build horizontal, vertical, or grid sprite sheets with configurable spacing; or render an animated GIF with adjustable frame rate, looping, and transparency. Every mode supports 1×–10× scaling and background choices, with live previews and size warnings.
 - **Multiple projects** — open several projects in tabs above the canvas. New projects can be named and started with a transparent, white, or black background. Each tab keeps its own document, history, zoom, pan, rotation, and unsaved state. Closing a dirty project asks for confirmation; closing the last project starts a new untitled one.
+- **Autosave and crash recovery** — unsaved projects are snapshotted to IndexedDB shortly after you pause drawing, and every few seconds during longer sessions. If the app is reloaded or crashes, the next launch offers the autosaved tabs with a live preview and **Restore** or **Discard** choices. Autosaves are recovery copies; saved `.pixelspell` files remain the source of truth.
 - **File import** — use **File → Import…** or drag and drop a file anywhere to open the import dialog. Common images (PNG, JPEG, GIF, WebP, BMP, AVIF, ICO, SVG) can become a new project, a normal layer, a new frame, a timeline reference layer, or a reference-board image. Project imports larger than 1024 × 1024 are cropped to the top-left corner; reference layers use the complete image fitted to the canvas, and board references retain their original full-resolution bytes. PNGs can also contribute a palette built from their unique colors, and JASC `.pal`, GIMP `.gpl`, and `.hex` palettes import directly. Palettes are capped at 256 colors and previewed before import.
 - **Projects** — save and open portable `.pixelspell` files; opened files get their own tab. Reference layers and board images are stored inside the project file, so references travel with the artwork.
 - **Canvas controls** — fit-to-window or manual zoom, scroll-wheel zoom, middle-mouse panning that always keeps part of the sprite on stage, canvas rotation from −180° to +180° in 15° steps, preset grid sizes from 1×1 to 64×64, and a live cursor preview. The grid control sits at the bottom left of the canvas, while rotation and zoom controls sit at the bottom right. A compact menu-bar readout shows the canvas size, last cursor coordinate, current frame, and active layer.
@@ -110,6 +111,7 @@ src/
         ├── render.ts           # Canvas and thumbnail rendering helpers
         ├── color.ts            # Packed RGBA and hex color utilities
         ├── file.ts             # Project serialization and save helpers
+        ├── autosave.ts         # IndexedDB crash-recovery snapshots
         ├── import.ts           # Image/palette import parsing and analysis
         ├── reference.ts        # Reference-layer fitting and board placement helpers
         ├── export.ts           # Image, sprite sheet, and GIF export encoding
@@ -142,8 +144,8 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 
 ## Notes and limitations
 
-- Open project tabs are kept in memory; reloading the page starts with a single new `Untitled` project.
-- Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project.
+- Open project tabs are kept in memory; reloading the page offers to recover any tabs that had unsaved changes from IndexedDB.
+- Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project. Closing a dirty project without saving also deletes its recovery snapshot.
 - **File → New project** and **File → Open project** create new tabs; **File → Save project** saves the active project.
 - **File → Import…** opens a file picker, and dropping a file anywhere in the app opens the same import dialog. Images can become project tabs, layers, frames, timeline reference layers, or reference-board images; palettes are added to the workspace palette collection.
 - **File → Export…** opens the export dialog for images, sprite sheets, and animated GIFs. Outputs are generated locally and downloaded by the browser.
@@ -155,5 +157,5 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 - Layer visibility and opacity are document-wide rather than per-frame.
 - Brushes are square and pixel-aligned; there is no free-transform (scale/rotate) tool for selections yet.
 - Projects are limited to 1024 layers and 1000 frames.
-- The editor does not auto-save. Use **File → Save project** to keep your work.
+- The editor autosaves dirty tabs to IndexedDB for crash recovery. Autosaves are offered on the next launch and do not replace **File → Save project**, which is still required to keep a `.pixelspell` file. Saving or discarding a dirty project clears its recovery snapshot.
 - The default canvas is 32 × 32; new projects can be 1–1024 px in each dimension.
