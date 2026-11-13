@@ -12,6 +12,29 @@
 	let closeDialogOpen = $state(false);
 	let pendingCloseId = $state<string | null>(null);
 	let pendingName = $state("");
+	let editingId = $state<string | null>(null);
+	let renameDraft = $state("");
+	let renameInput = $state<HTMLInputElement | null>(null);
+
+	function startRename(id: string): void {
+		if (editor.activeProjectId !== id) editor.selectProject(id);
+		editingId = id;
+		renameDraft = editor.projectName(id);
+		tick().then(() => {
+			renameInput?.focus();
+			renameInput?.select();
+		});
+	}
+
+	function commitRename(): void {
+		if (!editingId) return;
+		editingId = null;
+		editor.renameProject(renameDraft);
+	}
+
+	function cancelRename(): void {
+		editingId = null;
+	}
 
 	function requestClose(id: string): void {
 		if (editor.projects.length === 1 && !editor.isProjectModified(id)) return;
@@ -69,22 +92,48 @@
 						: "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
 				)}
 			>
-				<button
-					type="button"
-					role="tab"
-					aria-selected={active}
-					class="flex min-w-0 flex-1 items-center gap-1.5 rounded-tl-md py-1.5 pl-2.5 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-					onclick={() => editor.selectProject(project.id)}
-					title={name}
-				>
-					<span class="max-w-36 truncate">{name}</span>
-					{#if dirty}
-						<span
-							class="size-1.5 shrink-0 rounded-full bg-primary"
-							title="Unsaved changes"
-						></span>
-					{/if}
-				</button>
+				{#if editingId === project.id}
+					<div class="flex min-w-0 flex-1 items-center py-1 pl-2.5 pr-1">
+						<input
+							bind:this={renameInput}
+							bind:value={renameDraft}
+							maxlength={60}
+							class="h-6 w-full min-w-0 rounded border bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+							aria-label={`Rename ${name}`}
+							onblur={commitRename}
+							onkeydown={(event) => {
+								if (event.key === "Enter") {
+									event.preventDefault();
+									commitRename();
+								} else if (event.key === "Escape") {
+									event.preventDefault();
+									cancelRename();
+								}
+							}}
+						/>
+					</div>
+				{:else}
+					<button
+						type="button"
+						role="tab"
+						aria-selected={active}
+						class="flex min-w-0 flex-1 items-center gap-1.5 rounded-tl-md py-1.5 pl-2.5 pr-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+						onclick={() => editor.selectProject(project.id)}
+						ondblclick={(event) => {
+							event.stopPropagation();
+							startRename(project.id);
+						}}
+						title={`${name} — double-click to rename`}
+					>
+						<span class="max-w-36 truncate">{name}</span>
+						{#if dirty}
+							<span
+								class="size-1.5 shrink-0 rounded-full bg-primary"
+								title="Unsaved changes"
+							></span>
+						{/if}
+					</button>
+				{/if}
 
 				<button
 					type="button"

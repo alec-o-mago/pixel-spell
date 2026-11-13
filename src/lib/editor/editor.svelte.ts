@@ -1424,6 +1424,26 @@ export class EditorState {
 		return this.projects.find((project) => project.id === id)?.name ?? "Untitled";
 	}
 
+	/** Renames the active project tab and marks the project as unsaved. */
+	renameProject(name: string): boolean {
+		const trimmed = name.trim().slice(0, 60);
+		if (!trimmed || trimmed === this.name) return false;
+
+		this.name = trimmed;
+		this.dirty = true;
+		this.modified = true;
+
+		const tab = this.projects.find(
+			(project) => project.id === this.activeProjectId,
+		);
+		if (tab) {
+			tab.name = trimmed;
+			tab.dirty = true;
+			tab.modified = true;
+		}
+		return true;
+	}
+
 	selectProject(id: string): void {
 		if (id === this.activeProjectId) return;
 		if (!this.projects.some((project) => project.id === id)) return;

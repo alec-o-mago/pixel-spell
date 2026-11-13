@@ -67,7 +67,7 @@ Key files:
 | `lib/components/editor/CanvasTransformPreview.svelte` | Shared fit-to-stage canvas preview |
 | `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
 | `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
-| `lib/components/editor/ProjectTabs.svelte` | Project tab strip, new-project button, unsaved-close dialog |
+| `lib/components/editor/ProjectTabs.svelte` | Project tab strip, inline tab renaming, new-project button, unsaved-close dialog |
 
 ## State and reactivity
 
@@ -103,6 +103,7 @@ Key files:
 - Inactive project state is stored in the private `#states` map as a `ProjectSnapshot` (doc, active layer/frame/reference, zoom, pan, undo/redo).
 - Before switching, creating, opening, or saving, `#syncActiveProject()` copies live state into the active tab/snapshot. `#activateProject(id)` loads a target snapshot and tab metadata into the live fields.
 - UI should use `projectName(id)`, `isProjectDirty(id)`, and `isProjectModified(id)`. They return live values for the active project and stored values for inactive tabs.
+- Double-clicking a tab name edits it inline. `startRename` selects the tab first, then swaps the tab button for an input; Enter or blur calls `editor.renameProject`, Escape cancels. Renaming is not undoable but marks the project dirty/modified and updates the tab metadata so the name is saved with the project.
 - `newProject(width, height, { name, background })` and `openProject(loaded)` add a tab and activate it. `background` is `transparent`, `white`, or `black`; opaque backgrounds fill the initial layer and name it `Background`. `closeProject(id)` removes a tab; closing the last project creates a new `Untitled` project. Closing the only never-modified project is a no-op.
 - `dirty` means unsaved changes (tab dot + close confirmation). `modified` means the project has ever been touched, loaded, or saved (controls whether the single-project close button is enabled).
 - Undo/redo, zoom, pan, rotation, active layer/frame, and the document are per project. Tool, color, palette collection, theme, grid, preview visibility, and timeline height are workspace-wide.
@@ -254,7 +255,7 @@ Preserve these regions and their relative placement when making changes.
 - `npm run bench` completes without assertion failures (it also verifies project round-trips).
 - Drawing, erasing, fill, gradients, shapes, eyedropper, undo/redo, layer operations, lock toggling, frame operations, playback, cel selection, and timeline resizing still work.
 - Import destinations work for images: project, layer, frame, reference layer, and reference board; palettes still import. Reference layers are locked and non-exported; board references are independent of frames/layers, can be moved outside the canvas, and are embedded in saved projects.
-- Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, frame selection, and dirty state; closing a dirty project confirms first.
+- Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, frame selection, and dirty state; closing a dirty project confirms first. Double-clicking a tab name renames it inline, marks it dirty, and the new name survives save/open and project switches.
 - Onion skinning shows previous/next frames behind the active frame, respects the range/opacity/tint controls, toggles with `O`, and stays hidden during playback.
 - Frame tags render as ranges, durations override the project FPS, loop ranges drive playback, and GIF export honors both. Frame reordering, multi-frame selection, copy/paste, duplicate-with-offset, and the right-click menu all update every layer's cels in lockstep.
 - Scale Canvas resamples every cel nearest-neighbor, Resize Canvas crops/extends around the chosen anchor with transparent new pixels, Crop to Content trims all transparent borders across layers and frames, and Crop to Selection uses the selection bounds. Each operation is undoable and clears the selection.
