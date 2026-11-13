@@ -40,6 +40,8 @@ Key files:
 | File | Responsibility |
 | --- | --- |
 | `lib/editor/editor.svelte.ts` | Singleton `editor` state, history, layer/frame operations, zoom/theme |
+| `lib/editor/commands.ts` | Command catalog shared by the command palette and shortcut editor |
+| `lib/editor/keybindings.svelte.ts` | Reactive keybindings, combo normalization, conflict checks, localStorage persistence |
 | `lib/editor/types.ts` | `PixelDoc`, `Layer`, `Frame`, `ToolId`, `Point` |
 | `lib/editor/doc.ts` | Document creation/cloning, layer compositing |
 | `lib/editor/draw.ts` | Brush, line, shapes (rectangle, ellipse, star, heart), flood fill, gradients |
@@ -54,6 +56,8 @@ Key files:
 | `lib/editor/tools.ts` | Tool metadata, labels, shortcuts |
 | `lib/editor/palette.ts` | Built-in palette, palette type, and localStorage persistence |
 | `lib/components/editor/TimelinePanel.svelte` | Timeline toolbar, tag ranges, frame×layer table, frame context menu, onion/loop controls, opacity footer |
+| `lib/components/editor/CommandPalette.svelte` | `Ctrl+K` searchable command runner |
+| `lib/components/editor/ShortcutsDialog.svelte` | Keybinding editor with capture, conflict detection, and restore defaults |
 | `lib/components/editor/Preview.svelte` | Closed scan-eye button and 1× floating frame preview |
 | `lib/components/editor/CanvasStage.svelte` | Canvas viewport, drawing pointer handling, reference-board placement, mirror/radial guides, zoom pill |
 | `lib/components/editor/ReferenceBoardPanel.svelte` | Floating project-level reference board manager |
@@ -95,6 +99,17 @@ Key files:
 - Frames own one cel per layer: `layer.cels[frameIndex]`. Adding/removing frames must update every layer's `cels` array in lockstep with `doc.frames`. Frame order changes must apply the same permutation to `doc.frames` and every layer's `cels`.
 - `Frame` also carries optional `duration` (ms) and `tag`; `PixelDoc` carries optional `loopStart`/`loopEnd`. Contiguous equal tags render as a tag range in the timeline. Keep these fields in `cloneDoc`, history, project files, and autosaves.
 - `frameSelection` and the shift-click anchor are per-project and must be included in `ProjectSnapshot`, `#syncActiveProject`, and `#activateProject`. Restored ids are filtered against the active document.
+
+## Commands and shortcuts
+
+- `lib/editor/commands.ts` is the single source of truth for global actions. Add a `CommandDef` there when introducing a user-facing action; the command palette, shortcut editor, and keyboard handler all read it.
+- Commands may have `enabled()` (hidden from the palette and skipped by the key handler when false), `ignoreRepeat` (for toggles such as playback), and extra `keywords` for search.
+- `lib/editor/keybindings.svelte.ts` owns the reactive `bindings` map, combo normalization (`mod` matches Ctrl or Cmd), formatting, conflict detection, and localStorage persistence under `pixel-spell-keybindings`.
+- Defaults live on the command definition as normalized combos (`"mod+shift+z"`, `"shift+g"`, `"alt+left"`, `"["`, `"space"`). A command can have several defaults (redo uses `Ctrl+Shift+Z` and `Ctrl+Y`).
+- `App.svelte` resolves every global keydown through `keybindings.commandForCombo`; do not add hardcoded shortcut branches there. Tool shortcuts are commands too (`tool.<id>`).
+- The shortcut editor captures keys on `window` in the capture phase and stops immediate propagation so the app handler and dialog Escape handling do not run while rebinding. It rejects conflicts and supports up to three bindings per command.
+- Restoring defaults replaces the map and removes the localStorage record.
+- `App.svelte` prevents the browser context menu globally with `oncontextmenucapture`. App-specific context menus still receive the event; they just must not rely on the native menu.
 
 ## Projects and tabs
 

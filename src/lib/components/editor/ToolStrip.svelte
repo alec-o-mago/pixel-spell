@@ -3,12 +3,17 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
+	import { keybindings } from "$lib/editor/keybindings.svelte.js";
 	import { TOOLS } from "$lib/editor/tools.js";
 	import { cn } from "$lib/utils.js";
 	import ToolIcon from "./ToolIcon.svelte";
 
 	// Pan/zoom | selection tools | paint tools | fill/gradient/eyedropper | area tools
 	const SEPARATOR_BEFORE = new Set([2, 6, 12, 15]);
+
+	function shortcutLabel(id: string): string {
+		return keybindings.primaryLabel(`tool.${id}`) || "Unbound";
+	}
 </script>
 
 <aside
@@ -32,7 +37,7 @@
 							editor.tool === tool.id &&
 								"bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground dark:hover:bg-primary/90 dark:hover:text-primary-foreground",
 						)}
-						aria-label={`${tool.label} (${tool.shortcut})`}
+						aria-label={`${tool.label} (${shortcutLabel(tool.id)})`}
 						aria-pressed={editor.tool === tool.id}
 						onclick={() => editor.setTool(tool.id)}
 					>
@@ -50,7 +55,7 @@
 						data-slot="kbd"
 						class="ml-1 rounded border border-background/25 px-1 font-mono text-[10px] opacity-80"
 					>
-						{tool.shortcut}
+						{shortcutLabel(tool.id)}
 					</kbd>
 				</div>
 			</Tooltip.Content>

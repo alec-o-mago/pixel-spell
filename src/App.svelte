@@ -3,6 +3,7 @@
 	import FileUp from "@lucide/svelte/icons/file-up";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import AboutDialog from "$lib/components/editor/AboutDialog.svelte";
+	import CommandPalette from "$lib/components/editor/CommandPalette.svelte";
 	import ExportDialog from "$lib/components/editor/ExportDialog.svelte";
 	import ImportDialog from "$lib/components/editor/ImportDialog.svelte";
 	import RecoveryDialog from "$lib/components/editor/RecoveryDialog.svelte";
@@ -22,11 +23,14 @@
 		loadRecoveryProjects,
 		type RecoveredProject,
 	} from "$lib/editor/autosave.js";
+	import { COMMAND_BY_ID, setCommandHost } from "$lib/editor/commands.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
+	import { readProjectFile } from "$lib/editor/file.js";
 	import { IMPORT_ACCEPT } from "$lib/editor/import.js";
-	import { TOOL_SHIFT_SHORTCUTS, TOOL_SHORTCUTS } from "$lib/editor/tools.js";
+	import { comboFromEvent, keybindings } from "$lib/editor/keybindings.svelte.js";
 
 	let newDialogOpen = $state(false);
+	let commandPaletteOpen = $state(false);
 	let shortcutsOpen = $state(false);
 	let aboutOpen = $state(false);
 	let importDialogOpen = $state(false);
@@ -35,6 +39,7 @@
 	let resizeCanvasOpen = $state(false);
 	let importFile = $state<File | null>(null);
 	let importInput: HTMLInputElement | undefined;
+	let projectInput: HTMLInputElement | undefined;
 	let draggingFile = $state(false);
 	let dragDepth = 0;
 	let recoveryOpen = $state(false);
@@ -117,6 +122,28 @@
 
 	function openImportPicker(): void {
 		importInput?.click();
+	}
+
+	function openProjectPicker(): void {
+		projectInput?.click();
+	}
+
+	async function onProjectInput(event: Event): Promise<void> {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = "";
+		if (!file) return;
+
+		try {
+			const project = await readProjectFile(file);
+			if (!project) {
+				window.alert("That file could not be opened as a Pixel Spell project.");
+				return;
+			}
+			editor.openProject(project);
+		} catch {
+			window.alert("That file could not be read. It may be corrupted or too large.");
+		}
 	}
 
 	function onImportInput(event: Event): void {
@@ -203,8 +230,29 @@
 		return !NON_TEXT_INPUT_TYPES.has((element as HTMLInputElement).type);
 	}
 
+	setCommandHost({
+		openNewProject: () => (newDialogOpen = true),
+		openProject: openProjectPicker,
+		openImport: openImportPicker,
+		openExport: () => (exportDialogOpen = true),
+		openScaleCanvas: () => (scaleCanvasOpen = true),
+		openResizeCanvas: () => (resizeCanvasOpen = true),
+		openShortcuts: () => (shortcutsOpen = true),
+		openAbout: () => (aboutOpen = true),
+		openCommandPalette: () => (commandPaletteOpen = true),
+	});
+
 	function handleKeydown(event: KeyboardEvent): void {
-		if (isTypingTarget(event.target)) return;
+		const combo = comboFromEvent(event);
+		if (!combo) return;
+
+		const commandId = keybindings.commandForCombo(combo);
+		if (!commandId) return;
+		const command = COMMAND_BY_ID[commandId];
+		if (!command) return;
+
+		const isPalette = commandId === "app.command-palette";
+		if (isTypingTarget(event.target) && !isPalette) return;
 
 		const element = event.target as HTMLElement | null;
 		// Let focused buttons and links handle Space/Enter themselves instead
@@ -223,113 +271,14 @@
 			return;
 		}
 
-		const modifier = event.ctrlKey || event.metaKey;
-		const key = event.key.toLowerCase();
-
-		if (modifier) {
-			if (key === "z") {
-				event.preventDefault();
-				if (event.shiftKey) editor.redo();
-				else editor.undo();
-				return;
-			}
-			if (key === "y") {
-				event.preventDefault();
-				editor.redo();
-				return;
-			}
-			if (key === "n") {
-				event.preventDefault();
-				newDialogOpen = true;
-				return;
-			}
-			if (key === "s") {
-				event.preventDefault();
-				editor.saveToFile();
-				return;
-			}
-			if (key === "a") {
-				event.preventDefault();
-				editor.selectAll();
-				return;
-			}
-			if (key === "c") {
-				event.preventDefault();
-				editor.copySelection();
-				return;
-			}
-			if (key === "v") {
-				event.preventDefault();
-				editor.pasteSelection();
-				return;
-			}
-			return;
-		}
-
-		if (event.altKey) {
-			if (event.key === "ArrowLeft") {
-				event.preventDefault();
-				editor.moveSelectedFrames(-1);
-				return;
-			}
-			if (event.key === "ArrowRight") {
-				event.preventDefault();
-				editor.moveSelectedFrames(1);
-				return;
-			}
-			return;
-		}
-
-		if (event.key === "Delete") {
+		if (command.ignoreRepeat && event.repeat) {
 			event.preventDefault();
-			editor.deleteSelection();
 			return;
 		}
+		if (command.enabled && !command.enabled()) return;
 
-		if (key === "o") {
-			editor.toggleOnion();
-			return;
-		}
-
-		if (event.shiftKey && key === "g") {
-			event.preventDefault();
-			editor.showGrid = !editor.showGrid;
-			return;
-		}
-
-		if (event.shiftKey) {
-			const shiftTool = TOOL_SHIFT_SHORTCUTS[key];
-			if (shiftTool) {
-				editor.setTool(shiftTool);
-				return;
-			}
-		}
-
-		const tool = TOOL_SHORTCUTS[key];
-		if (tool) {
-			editor.setTool(tool);
-			return;
-		}
-
-		if (event.key === " ") {
-			event.preventDefault();
-			if (event.repeat) return;
-			editor.togglePlayback();
-			return;
-		}
-		if (key === "[" || key === ",") {
-			editor.previousFrame();
-			return;
-		}
-		if (key === "]" || key === ".") {
-			editor.nextFrame();
-			return;
-		}
-		if (event.key === "Escape") {
-			editor.playing = false;
-			editor.clearSelection();
-			editor.clearReferenceSelection();
-		}
+		event.preventDefault();
+		command.run();
 	}
 </script>
 
@@ -337,8 +286,10 @@
 	<div class="flex h-svh flex-col overflow-hidden bg-background text-foreground">
 		<MenuBar
 			onNew={() => (newDialogOpen = true)}
+			onOpen={openProjectPicker}
 			onImport={openImportPicker}
 			onExport={() => (exportDialogOpen = true)}
+			onCommandPalette={() => (commandPaletteOpen = true)}
 			onShortcuts={() => (shortcutsOpen = true)}
 			onAbout={() => (aboutOpen = true)}
 			onScaleCanvas={() => (scaleCanvasOpen = true)}
@@ -358,6 +309,7 @@
 	</div>
 
 	<NewDocumentDialog bind:open={newDialogOpen} />
+	<CommandPalette bind:open={commandPaletteOpen} />
 	<ShortcutsDialog bind:open={shortcutsOpen} />
 	<AboutDialog bind:open={aboutOpen} />
 	<ImportDialog bind:open={importDialogOpen} file={importFile} />
@@ -394,10 +346,18 @@
 		class="hidden"
 		onchange={onImportInput}
 	/>
+	<input
+		bind:this={projectInput}
+		type="file"
+		accept=".pixelspell,application/octet-stream"
+		class="hidden"
+		onchange={onProjectInput}
+	/>
 </Tooltip.Provider>
 
 <svelte:window
 	onkeydown={handleKeydown}
+	oncontextmenucapture={(event) => event.preventDefault()}
 	ondragenter={handleDragEnter}
 	ondragover={handleDragOver}
 	ondragleave={handleDragLeave}

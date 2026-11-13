@@ -116,20 +116,6 @@ export const TOOL_BY_ID = Object.fromEntries(
 	TOOLS.map((tool) => [tool.id, tool]),
 ) as Record<ToolId, ToolDef>;
 
-export const TOOL_SHORTCUTS = Object.fromEntries(
-	TOOLS.filter((tool) => !tool.shortcut.startsWith("⇧")).map((tool) => [
-		tool.shortcut.toLowerCase(),
-		tool.id,
-	]),
-) as Record<string, ToolId>;
-
-export const TOOL_SHIFT_SHORTCUTS = Object.fromEntries(
-	TOOLS.filter((tool) => tool.shortcut.startsWith("⇧")).map((tool) => [
-		tool.shortcut.slice(1).toLowerCase(),
-		tool.id,
-	]),
-) as Record<string, ToolId>;
-
 const SELECTION_TOOL_IDS = new Set<ToolId>([
 	"magic-wand",
 	"shape-select",

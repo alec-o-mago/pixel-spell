@@ -82,7 +82,8 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Eyedropper          | `I`                      |
 | Blur                | `K`                      |
 | Jumble              | `J`                      |
-| Undo / redo         | `Ctrl+Z` / `Ctrl+Shift+Z` |
+| Command palette     | `Ctrl+K`                 |
+| Undo / redo         | `Ctrl+Z` / `Ctrl+Shift+Z` or `Ctrl+Y` |
 | New project         | `Ctrl+N`                 |
 | Save project        | `Ctrl+S`                 |
 | Play / pause        | `Space`                  |
@@ -97,7 +98,7 @@ Open the URL printed by Vite (usually `http://localhost:5173`).
 | Deselect            | `Esc`                    |
 | Resize timeline     | Drag divider, or `↑` / `↓` |
 
-Shortcuts are ignored while typing in an input. The Help menu also lists them.
+`Ctrl+K` opens a searchable command palette for every action. Every shortcut can be rebound in **Help → Keyboard shortcuts**: click a key chip and press the new combination, use `+` to add an alternate binding, or click the × to remove one. Conflicts are rejected with an inline message, and **Restore defaults** resets the whole set. Bindings are saved in the browser and apply immediately to the menu bar, tooltips, and command palette. Shortcuts are ignored while typing in an input, except `Ctrl+K`. Right-clicking never opens the browser context menu.
 
 ## Project structure
 
@@ -123,6 +124,8 @@ src/
         ├── reference.ts        # Reference-layer fitting and board placement helpers
         ├── export.ts           # Image, sprite sheet, and GIF export encoding
         ├── palette.ts          # Default palette and palette persistence
+        ├── commands.ts         # Command catalog for the palette and shortcuts
+        ├── keybindings.svelte.ts # Rebinding state, conflict checks, persistence
         └── tools.ts            # Tool metadata and shortcuts
 bench/                          # Deterministic core benchmarks (npm run bench)
 docs/                           # Screenshot, performance notes, planned features

@@ -24,6 +24,7 @@
 	import Scaling from "@lucide/svelte/icons/scaling";
 	import Scan from "@lucide/svelte/icons/scan";
 	import ScanEye from "@lucide/svelte/icons/scan-eye";
+	import Search from "@lucide/svelte/icons/search";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
 	import Undo2 from "@lucide/svelte/icons/undo-2";
@@ -34,7 +35,7 @@
 	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-	import { readProjectFile } from "$lib/editor/file.js";
+	import { keybindings } from "$lib/editor/keybindings.svelte.js";
 	import {
 		editor,
 		RADIAL_SYMMETRY_MAX,
@@ -43,23 +44,26 @@
 
 	let {
 		onNew,
+		onOpen,
 		onImport,
 		onExport,
+		onCommandPalette,
 		onShortcuts,
 		onAbout,
 		onScaleCanvas,
 		onResizeCanvas,
 	}: {
 		onNew: () => void;
+		onOpen: () => void;
 		onImport: () => void;
 		onExport: () => void;
+		onCommandPalette: () => void;
 		onShortcuts: () => void;
 		onAbout: () => void;
 		onScaleCanvas: () => void;
 		onResizeCanvas: () => void;
 	} = $props();
 
-	let fileInput: HTMLInputElement | undefined;
 	let projectMenuOpen = $state(false);
 	let cropContentEnabled = $state(false);
 	let cropSelectionEnabled = $state(false);
@@ -111,26 +115,8 @@
 		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
 	}
 
-	function openProject(): void {
-		fileInput?.click();
-	}
-
-	async function handleFileChange(event: Event): Promise<void> {
-		const input = event.currentTarget as HTMLInputElement;
-		const file = input.files?.[0];
-		input.value = "";
-		if (!file) return;
-
-		try {
-			const project = await readProjectFile(file);
-			if (!project) {
-				window.alert("That file could not be opened as a Pixel Spell project.");
-				return;
-			}
-			editor.openProject(project);
-		} catch {
-			window.alert("That file could not be read. It may be corrupted or too large.");
-		}
+	function shortcutLabel(commandId: string): string {
+		return keybindings.primaryLabel(commandId);
 	}
 </script>
 
@@ -153,9 +139,11 @@
 				<DropdownMenu.Item onSelect={onNew}>
 					<FilePlus2 class="size-4" />
 					New project…
-					<DropdownMenu.Shortcut>Ctrl N</DropdownMenu.Shortcut>
+					{#if shortcutLabel("file.new")}
+						<DropdownMenu.Shortcut>{shortcutLabel("file.new")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
-				<DropdownMenu.Item onSelect={openProject}>
+				<DropdownMenu.Item onSelect={onOpen}>
 					<FolderOpen class="size-4" />
 					Open project…
 				</DropdownMenu.Item>
@@ -166,7 +154,9 @@
 				<DropdownMenu.Item onSelect={() => editor.saveToFile()}>
 					<Save class="size-4" />
 					Save project
-					<DropdownMenu.Shortcut>Ctrl S</DropdownMenu.Shortcut>
+					{#if shortcutLabel("file.save")}
+						<DropdownMenu.Shortcut>{shortcutLabel("file.save")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item onSelect={onExport}>
@@ -186,12 +176,16 @@
 				<DropdownMenu.Item onSelect={() => editor.undo()} disabled={!editor.canUndo}>
 					<Undo2 class="size-4" />
 					Undo
-					<DropdownMenu.Shortcut>Ctrl Z</DropdownMenu.Shortcut>
+					{#if shortcutLabel("edit.undo")}
+						<DropdownMenu.Shortcut>{shortcutLabel("edit.undo")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
 				<DropdownMenu.Item onSelect={() => editor.redo()} disabled={!editor.canRedo}>
 					<Redo2 class="size-4" />
 					Redo
-					<DropdownMenu.Shortcut>Ctrl ⇧ Z</DropdownMenu.Shortcut>
+					{#if shortcutLabel("edit.redo")}
+						<DropdownMenu.Shortcut>{shortcutLabel("edit.redo")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item
@@ -200,7 +194,9 @@
 				>
 					<Copy class="size-4" />
 					Copy selection
-					<DropdownMenu.Shortcut>Ctrl C</DropdownMenu.Shortcut>
+					{#if shortcutLabel("edit.copy-selection")}
+						<DropdownMenu.Shortcut>{shortcutLabel("edit.copy-selection")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
 				<DropdownMenu.Item
 					onSelect={() => editor.pasteSelection()}
@@ -208,7 +204,9 @@
 				>
 					<ClipboardPaste class="size-4" />
 					Paste selection
-					<DropdownMenu.Shortcut>Ctrl V</DropdownMenu.Shortcut>
+					{#if shortcutLabel("edit.paste-selection")}
+						<DropdownMenu.Shortcut>{shortcutLabel("edit.paste-selection")}</DropdownMenu.Shortcut>
+					{/if}
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item onSelect={() => editor.clearLayer()}>
@@ -308,6 +306,13 @@
 				Help
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content class="w-56">
+				<DropdownMenu.Item onSelect={onCommandPalette}>
+					<Search class="size-4" />
+					Command palette…
+					{#if shortcutLabel("app.command-palette")}
+						<DropdownMenu.Shortcut>{shortcutLabel("app.command-palette")}</DropdownMenu.Shortcut>
+					{/if}
+				</DropdownMenu.Item>
 				<DropdownMenu.Item onSelect={onShortcuts}>
 					<Keyboard class="size-4" />
 					Keyboard shortcuts
@@ -546,12 +551,4 @@
 			</Tooltip.Content>
 		</Tooltip.Root>
 	</div>
-
-	<input
-		bind:this={fileInput}
-		type="file"
-		accept=".pixelspell,application/octet-stream"
-		class="hidden"
-		onchange={handleFileChange}
-	/>
 </header>
