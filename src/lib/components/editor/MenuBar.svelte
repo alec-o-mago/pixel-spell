@@ -80,7 +80,15 @@
 		if (cropCheckFrame) cancelAnimationFrame(cropCheckFrame);
 		cropCheckFrame = requestAnimationFrame(() => {
 			cropCheckFrame = 0;
-			cropContentEnabled = editor.findContentBounds() !== null;
+			const content = editor.findContentBounds();
+			cropContentEnabled =
+				content !== null &&
+				!(
+					content.x === 0 &&
+					content.y === 0 &&
+					content.width === editor.doc.width &&
+					content.height === editor.doc.height
+				);
 			const bounds = editor.selectionCropBounds();
 			cropSelectionEnabled =
 				bounds !== null &&
