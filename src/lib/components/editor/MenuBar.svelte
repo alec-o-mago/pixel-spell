@@ -3,7 +3,9 @@
 	import ChevronDown from "@lucide/svelte/icons/chevron-down";
 	import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
 	import Copy from "@lucide/svelte/icons/copy";
+	import Crop from "@lucide/svelte/icons/crop";
 	import Eraser from "@lucide/svelte/icons/eraser";
+	import Expand from "@lucide/svelte/icons/expand";
 	import FileDown from "@lucide/svelte/icons/file-down";
 	import FileInput from "@lucide/svelte/icons/file-input";
 	import FilePlus2 from "@lucide/svelte/icons/file-plus-2";
@@ -19,6 +21,8 @@
 	import Moon from "@lucide/svelte/icons/moon";
 	import Redo2 from "@lucide/svelte/icons/redo-2";
 	import Save from "@lucide/svelte/icons/save";
+	import Scaling from "@lucide/svelte/icons/scaling";
+	import Scan from "@lucide/svelte/icons/scan";
 	import ScanEye from "@lucide/svelte/icons/scan-eye";
 	import Sun from "@lucide/svelte/icons/sun";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -43,20 +47,57 @@
 		onExport,
 		onShortcuts,
 		onAbout,
+		onScaleCanvas,
+		onResizeCanvas,
 	}: {
 		onNew: () => void;
 		onImport: () => void;
 		onExport: () => void;
 		onShortcuts: () => void;
 		onAbout: () => void;
+		onScaleCanvas: () => void;
+		onResizeCanvas: () => void;
 	} = $props();
 
 	let fileInput: HTMLInputElement | undefined;
+	let projectMenuOpen = $state(false);
+	let cropContentEnabled = $state(false);
+	let cropSelectionEnabled = $state(false);
+	let cropCheckFrame = 0;
 	let cursor = $derived(editor.cursor ?? editor.lastCursor);
 	const RADIAL_COUNTS = Array.from(
 		{ length: RADIAL_SYMMETRY_MAX - RADIAL_SYMMETRY_MIN + 1 },
 		(_, index) => RADIAL_SYMMETRY_MIN + index,
 	);
+
+	$effect(() => {
+		if (!projectMenuOpen) return;
+		// Compute availability only while the menu is open; content bounds are
+		// too expensive to scan on every menu-bar render.
+		editor.revision;
+		editor.structureRevision;
+		editor.selectionRevision;
+		if (cropCheckFrame) cancelAnimationFrame(cropCheckFrame);
+		cropCheckFrame = requestAnimationFrame(() => {
+			cropCheckFrame = 0;
+			cropContentEnabled = editor.findContentBounds() !== null;
+			const bounds = editor.selectionCropBounds();
+			cropSelectionEnabled =
+				bounds !== null &&
+				!(
+					bounds.x === 0 &&
+					bounds.y === 0 &&
+					bounds.width === editor.doc.width &&
+					bounds.height === editor.doc.height
+				);
+		});
+		return () => {
+			if (cropCheckFrame) {
+				cancelAnimationFrame(cropCheckFrame);
+				cropCheckFrame = 0;
+			}
+		};
+	});
 
 	function activeRing(active: boolean): string {
 		return active ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "";
@@ -169,6 +210,41 @@
 				<DropdownMenu.Item onSelect={() => editor.clearFrame()}>
 					<Trash2 class="size-4" />
 					Clear frame
+				</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
+
+		<DropdownMenu.Root bind:open={projectMenuOpen}>
+			<DropdownMenu.Trigger
+				class="h-8 rounded-md px-2.5 text-xs font-medium text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
+			>
+				Project
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content class="w-60">
+				<DropdownMenu.Item onSelect={onScaleCanvas}>
+					<Scaling class="size-4" />
+					Scale Canvas…
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={onResizeCanvas}>
+					<Expand class="size-4" />
+					Resize Canvas…
+				</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item
+					onSelect={() => editor.cropToContent()}
+					disabled={!cropContentEnabled}
+					title="Trim transparent borders around all visible artwork. Reference layers and board images are ignored."
+				>
+					<Scan class="size-4" />
+					Crop to Content
+				</DropdownMenu.Item>
+				<DropdownMenu.Item
+					onSelect={() => editor.cropToSelection()}
+					disabled={!cropSelectionEnabled}
+					title="Crop to the smallest rectangle containing the selected pixels."
+				>
+					<Crop class="size-4" />
+					Crop to Selection
 				</DropdownMenu.Item>
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>

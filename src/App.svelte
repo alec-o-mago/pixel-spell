@@ -12,6 +12,8 @@
 	import MenuBar from "$lib/components/editor/MenuBar.svelte";
 	import NewDocumentDialog from "$lib/components/editor/NewDocumentDialog.svelte";
 	import ProjectTabs from "$lib/components/editor/ProjectTabs.svelte";
+	import ResizeCanvasDialog from "$lib/components/editor/ResizeCanvasDialog.svelte";
+	import ScaleCanvasDialog from "$lib/components/editor/ScaleCanvasDialog.svelte";
 	import ShortcutsDialog from "$lib/components/editor/ShortcutsDialog.svelte";
 	import ToolStrip from "$lib/components/editor/ToolStrip.svelte";
 	import {
@@ -29,6 +31,8 @@
 	let aboutOpen = $state(false);
 	let importDialogOpen = $state(false);
 	let exportDialogOpen = $state(false);
+	let scaleCanvasOpen = $state(false);
+	let resizeCanvasOpen = $state(false);
 	let importFile = $state<File | null>(null);
 	let importInput: HTMLInputElement | undefined;
 	let draggingFile = $state(false);
@@ -337,6 +341,8 @@
 			onExport={() => (exportDialogOpen = true)}
 			onShortcuts={() => (shortcutsOpen = true)}
 			onAbout={() => (aboutOpen = true)}
+			onScaleCanvas={() => (scaleCanvasOpen = true)}
+			onResizeCanvas={() => (resizeCanvasOpen = true)}
 		/>
 
 		<div class="flex min-h-0 flex-1">
@@ -356,6 +362,8 @@
 	<AboutDialog bind:open={aboutOpen} />
 	<ImportDialog bind:open={importDialogOpen} file={importFile} />
 	<ExportDialog bind:open={exportDialogOpen} />
+	<ScaleCanvasDialog bind:open={scaleCanvasOpen} />
+	<ResizeCanvasDialog bind:open={resizeCanvasOpen} />
 	<RecoveryDialog
 		bind:open={recoveryOpen}
 		projects={recoveredProjects}

@@ -17,6 +17,7 @@ A focused pixel art editor that runs entirely in the browser. Draw sprites, buil
 - **Onion skinning** — show previous and/or next frames at low opacity behind the active frame. Choose a 1–3 frame range, 15/30/50% opacity, and a previous/next tint preset. Toggle it with `O`, the ghost button, or its settings menu.
 - **Multi-frame editing** — copy, paste, and duplicate selected frame ranges. Duplicate can shift every cel by X/Y offsets. Right-click a frame header or cel for the same actions plus move left/right, frame duration and tag settings, loop range controls, and delete.
 - **Frame tags, durations, and loop range** — give frames a tag and a custom duration. Contiguous frames with the same tag appear as tag ranges above the timeline; click a range to select it. Set a loop range for playback and GIF export. Per-frame durations override the project FPS, and GIF export can honor the loop range.
+- **Canvas size tools** — the Project menu scales, resizes, and crops the canvas. **Scale Canvas** resamples with nearest-neighbor and offers a live preview, aspect lock, and ½×/1×/2×/3× presets. **Resize Canvas** crops or extends around a 3×3 anchor with a live preview. **Crop to Content** trims transparent borders across every layer and frame, and **Crop to Selection** crops to the selection rectangle. All four are undoable.
 - **Reference layers** — add a locked, non-exported reference layer to the timeline from an image. Reference layers are fitted to the canvas, can be shown or hidden, have their own opacity, and keep a cel per frame for animation-focused reference work. Use the timeline's reference-eye button for a quick import, or choose **Reference Layer** in the import dialog to apply to one frame or all frames. With a reference layer selected, the same timeline button replaces the current frame's reference cel, making it easy to build a per-frame reference sequence.
 - **Reference board** — a project-level mood board for images that should not live in the layer stack. Board references are independent of frames and layers, can be moved outside the canvas, support visibility, lock, opacity, zoom, and rotation controls, and are never exported. Toggle it from **View → Show reference board** or the top-left canvas button.
 - **Resizable workspace** — drag the divider above the timeline, or focus it and use `↑` / `↓`, to resize the canvas/timeline split. The height is remembered between visits.
@@ -117,6 +118,7 @@ src/
         ├── color.ts            # Packed RGBA and hex color utilities
         ├── file.ts             # Project serialization and save helpers
         ├── autosave.ts         # IndexedDB crash-recovery snapshots
+        ├── canvas.ts           # Nearest-neighbor scale, resize, and crop helpers
         ├── import.ts           # Image/palette import parsing and analysis
         ├── reference.ts        # Reference-layer fitting and board placement helpers
         ├── export.ts           # Image, sprite sheet, and GIF export encoding
@@ -152,7 +154,9 @@ Each open project is a separate `PixelDoc` session with its own active layer/fra
 
 - Open project tabs are kept in memory; reloading the page offers to recover any tabs that had unsaved changes from IndexedDB.
 - Each tab shows an unsaved dot when it has unsaved progress. Closing a dirty project asks for confirmation, and the close button is disabled for a single untouched project. Closing a dirty project without saving also deletes its recovery snapshot.
-- **File → New project** and **File → Open project** create new tabs; **File → Save project** saves the active project.
+- **File → New project** and **File → Open project** create new tabs; **File → Save project** saves the active project. The **Project** menu contains canvas scaling, resizing, and cropping.
+- Canvas transforms apply to every layer and frame. Reference layers are resampled or cropped with the artwork; reference-board images keep their absolute position and size. Crop to Content ignores reference layers and board images, so tracing aids do not prevent a tight crop.
+- Canvas transforms clear the current pixel selection and are undoable. Scale uses nearest-neighbor sampling, not bilinear smoothing.
 - **File → Import…** opens a file picker, and dropping a file anywhere in the app opens the same import dialog. Images can become project tabs, layers, frames, timeline reference layers, or reference-board images; palettes are added to the workspace palette collection.
 - **File → Export…** opens the export dialog for images, sprite sheets, and animated GIFs. Outputs are generated locally and downloaded by the browser.
 - Reference layers are locked and never exported. They are fitted to the canvas and store one cel per frame, so each frame can carry its own reference. Applying a large reference to many frames increases project file size because each reference cel is saved like a normal cel.

@@ -47,6 +47,7 @@ Key files:
 | `lib/editor/color.ts` | Hex/RGBA conversion and packed pixel helpers |
 | `lib/editor/file.ts` | Project serialization, save helpers |
 | `lib/editor/autosave.ts` | IndexedDB crash-recovery snapshots |
+| `lib/editor/canvas.ts` | Nearest-neighbor scale, anchored resize, crop, and content bounds |
 | `lib/editor/import.ts` | Image decoding, palette parsing, and import analysis |
 | `lib/editor/reference.ts` | Reference-layer fitting and reference-board placement helpers |
 | `lib/editor/export.ts` | Image, sprite sheet, and GIF export encoding |
@@ -61,6 +62,9 @@ Key files:
 | `lib/components/editor/TimelineLayerRow.svelte` | Sticky layer header and cel cells for one layer row |
 | `lib/components/editor/FramePropertiesDialog.svelte` | Per-frame duration and tag editor |
 | `lib/components/editor/DuplicateFramesDialog.svelte` | Duplicate frames with X/Y cel offsets |
+| `lib/components/editor/ScaleCanvasDialog.svelte` | Scale canvas with preview, aspect lock, and presets |
+| `lib/components/editor/ResizeCanvasDialog.svelte` | Resize canvas with preview and anchor grid |
+| `lib/components/editor/CanvasTransformPreview.svelte` | Shared fit-to-stage canvas preview |
 | `lib/components/editor/TimelineDock.svelte` | Draggable canvas/timeline splitter and persisted timeline height |
 | `lib/components/editor/CelThumb.svelte` | Per-cel thumbnail canvas |
 | `lib/components/editor/ProjectTabs.svelte` | Project tab strip, new-project button, unsaved-close dialog |
@@ -77,6 +81,9 @@ Key files:
 - `editor.frameSelection` holds selected frame ids and always includes the active frame except during playback. `editor.selectedFrameIndices` returns them in timeline order. Frame operations (copy, paste, duplicate, reorder, delete, duration, tag) operate on that selection.
 - `Frame.duration` is optional; missing means `1000 / doc.fps`. `doc.loopStart`/`doc.loopEnd` are optional inclusive indices. Use `frameDurationMs`, `loopRangeOf`, and `hasCustomLoopRange` from `doc.ts` instead of duplicating the fallback logic.
 - Onion skin state (`onionEnabled`, range, opacity, previous/next toggle, tints) is workspace-wide and does not touch the document, history, or dirty flag. `editor.onionSkins` returns the neighboring frame indices and hides them during playback.
+- Canvas transforms live in `editor.scaleCanvas`, `resizeCanvas`, `cropCanvasTo`, `cropToContent`, and `cropToSelection`. They transform every layer's cels (including reference layers), change `doc.width`/`height`, clear the pixel selection, and bump `structureRevision` + `revision`. They are undoable via `pushHistory`; do not transform only the active frame.
+- `canvas.ts` holds the pure pixel helpers: `scalePixelsNearest`, `resizePixels`, and `contentBoundsOf`. `contentBoundsOf` scans all frames and normal layers and ignores `role: "reference"` layers; reference-board images are not part of the document composite and are never transformed.
+- `MenuBar.svelte` lazily computes Crop to Content/Selection availability only while the Project menu is open, because content bounds are a full document scan. Keep that behavior instead of evaluating it on every menu-bar render.
 - Pixel edits use `editor.pushHistoryCel(layerId, frame)` and structural edits use `editor.pushHistory()`. Do not use `pushHistory()` for a brush stroke: it clones every layer and frame. `pushHistoryCels` records several cels at once (for example, clearing a frame).
 - `compositeFrameCached(doc, frame, revision, includeReferences)` memoizes up to eight frame variants and returns a shared read-only buffer. It defaults to excluding reference layers so export/preview paths are safe. `CanvasStage` passes `true` for the viewport; `Preview`, `ExportDialog`, and export encoders use the default. Use `compositeFrame` when a caller may need to own or mutate the buffer.
 - `render.ts` reuses a scratch canvas/ImageData and exposes `drawPixels`, `drawScaled`, and `drawThumbnail`. Do not allocate a new canvas per draw.
@@ -184,7 +191,7 @@ When adding a tool:
 The shell is intentionally:
 
 ```
-Menu bar (menus left, canvas/frame/layer readout centered, display toggles right)
+Menu bar (File/Edit/Project/View/Help menus left, canvas/frame/layer readout centered, display toggles right)
 ├── Tool strip (left, thin, square buttons + tooltips)
 ├── Left panel (tool options on top, color picker/palette below)
 └── Main area
@@ -223,6 +230,9 @@ Preserve these regions and their relative placement when making changes.
 - The canvas stage is a fixed viewport (no native scrollbars). The sprite is absolutely positioned at the stage center, rotated by `editor.rotation`, and translated by `editor.panX`/`editor.panY`, so panning and rotation work at every zoom level. Pointer coordinates are mapped through the inverse rotation into canvas-local space, so drawing works at every rotation. Middle-mouse drag pans regardless of the active tool. Pan is clamped using the rotated bounding box so at least one sprite pixel stays visible, and a resize or rotation that invalidates the pan recenters the view. Fit zoom accounts for rotation. Zooming moves the view halfway from the current center toward the pointer. The grid uses `editor.gridSize` (1–64 document pixels per cell) and is only drawn when a cell is at least 6 screen pixels. Mirror guides are drawn on a stage-sized overlay, rotate with the canvas, and can be dragged from anywhere on the stage, not just the canvas. Mirror toggles/positions intentionally do **not** increment `revision`; the mirror overlay effect tracks the mirror state directly. Radial symmetry shares that overlay: it stores its center as an offset from the document center, draws red spoke guides plus a draggable center handle in red, and can be combined with the axis mirrors. Disabling it resets the center. `CanvasStage` snapshots both the mirror axes and the radial settings once per stroke.
 - `CanvasStage` caches the stage bounding rect in `stageRect` (updated by its `ResizeObserver`) instead of calling `getBoundingClientRect()` for every pointer event.
 - `editor.touch()` invalidates `compositeFrameCached`; changes that do not affect pixels (pan, zoom, rotation, mirror guides) must not call it. `editor.selectLayer`/`selectFrame` also do not invalidate pixels.
+- Canvas scale/resize/crop must transform every layer's entire `cels` array in one pass and then update `doc.width`/`height`. Clear `selection`/`selectionRevision` because the old mask no longer matches the new dimensions. Reference-board images are independent `<img>` overlays and keep their coordinates; reference layers are cels and must be transformed.
+- Crop to Content uses `contentBoundsOf`, which intentionally ignores reference layers and board images. Crop to Selection uses the selection mask bounds, even when the selected region is transparent. Both return false when the requested rectangle is already the full canvas.
+- The Project menu recomputes crop availability in a `requestAnimationFrame` only while open. Do not turn `findContentBounds()` into a getter that runs on every menu-bar render or every brush stamp.
 - The frame context menu is a fixed-position custom menu, not a shadcn dropdown. It closes on outside `pointerdown` and Escape. Frame actions operate on `frameSelection`, so right-clicking an unselected frame selects it first, while right-clicking a selected frame preserves the range. `App.svelte` ignores global shortcuts whose target is inside `[role="menu"]`.
 - The temporal frame clipboard (`#frameClipboard`) is separate from the pixel clipboard and is shared across project tabs. It stores one cel per layer id plus duration/tag; pasting into a project with different layer ids fills missing cels with transparent buffers.
 - GIF export uses `animationFrameIndices(doc, loopRange)`; explicit frame durations override the dialog's fallback FPS. Keep palette collection and the frame loop on the same index list or a loop-range export will build a palette from frames it never writes.
@@ -247,6 +257,7 @@ Preserve these regions and their relative placement when making changes.
 - Project tabs switch correctly with independent documents, undo history, zoom, active reference selection, frame selection, and dirty state; closing a dirty project confirms first.
 - Onion skinning shows previous/next frames behind the active frame, respects the range/opacity/tint controls, toggles with `O`, and stays hidden during playback.
 - Frame tags render as ranges, durations override the project FPS, loop ranges drive playback, and GIF export honors both. Frame reordering, multi-frame selection, copy/paste, duplicate-with-offset, and the right-click menu all update every layer's cels in lockstep.
+- Scale Canvas resamples every cel nearest-neighbor, Resize Canvas crops/extends around the chosen anchor with transparent new pixels, Crop to Content trims all transparent borders across layers and frames, and Crop to Selection uses the selection bounds. Each operation is undoable and clears the selection.
 - Autosave recovery survives a reload: a dirty project is offered with a preview, Restore reopens it as an unsaved tab, and Discard removes the snapshot. Saving a project removes its autosave.
 - Closing the last project creates a new `Untitled` project, and the only never-modified project's close button is disabled.
 - The timeline table keeps its sticky header row and layer column while scrolling, and the divider respects its min/max bounds.

@@ -3,6 +3,12 @@ import {
 	deleteAutosave,
 	writeAutosave,
 } from "./autosave.js";
+import {
+	type PixelBounds,
+	contentBoundsOf,
+	resizePixels,
+	scalePixelsNearest,
+} from "./canvas.js";
 import { isTransparent, normalizeHex, packColor, rgbToHex, unpackColor } from "./color.js";
 import {
 	MAX_FRAME_DURATION,
@@ -2146,6 +2152,180 @@ export class EditorState {
 		for (let i = 0; i < cel.length; i++) {
 			if (mask[i]) cel[i] = 0;
 		}
+	}
+
+	/** Tight bounds of painted pixels across all frames and normal layers. */
+	findContentBounds(): PixelBounds | null {
+		return contentBoundsOf(this.doc);
+	}
+
+	/** Bounds of the current pixel selection, or null when nothing is selected. */
+	selectionCropBounds(): PixelBounds | null {
+		return selectionBounds(this.selection, this.doc.width, this.doc.height);
+	}
+
+	#applyCanvasTransform(
+		width: number,
+		height: number,
+		transform: (cel: Uint32Array) => Uint32Array,
+	): void {
+		this.pushHistory();
+		for (const layer of this.doc.layers) {
+			layer.cels = layer.cels.map((cel) => transform(cel));
+		}
+		this.doc.width = width;
+		this.doc.height = height;
+		// The old mask and floating content no longer match the document size.
+		this.selection = null;
+		this.selectionRevision++;
+		this.structureRevision++;
+		this.revision++;
+	}
+
+	/** Resamples every cel to the new dimensions with nearest-neighbor scaling. */
+	scaleCanvas(width: number, height: number): boolean {
+		const nextWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		const nextHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
+			return false;
+		}
+
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		this.#applyCanvasTransform(nextWidth, nextHeight, (cel) =>
+			scalePixelsNearest(cel, oldWidth, oldHeight, nextWidth, nextHeight),
+		);
+		return true;
+	}
+
+	/**
+	 * Grows or crops every cel around an anchor. Anchor values are 0, 0.5, or 1
+	 * on each axis. New pixels are transparent.
+	 */
+	resizeCanvas(
+		width: number,
+		height: number,
+		anchorX = 0.5,
+		anchorY = 0.5,
+	): boolean {
+		const nextWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		const nextHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
+			MIN_SIZE,
+			MAX_SIZE,
+		);
+		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
+			return false;
+		}
+
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		const offsetX = Math.round(
+			(nextWidth - oldWidth) * clamp(anchorX, 0, 1),
+		);
+		const offsetY = Math.round(
+			(nextHeight - oldHeight) * clamp(anchorY, 0, 1),
+		);
+		this.#applyCanvasTransform(nextWidth, nextHeight, (cel) =>
+			resizePixels(
+				cel,
+				oldWidth,
+				oldHeight,
+				nextWidth,
+				nextHeight,
+				offsetX,
+				offsetY,
+			),
+		);
+		return true;
+	}
+
+	/** Crops every cel to an explicit rectangle in the current canvas. */
+	cropCanvasTo(
+		x: number,
+		y: number,
+		width: number,
+		height: number,
+	): boolean {
+		const oldWidth = this.doc.width;
+		const oldHeight = this.doc.height;
+		const cropX = clamp(
+			Number.isFinite(x) ? Math.round(x) : 0,
+			0,
+			oldWidth - 1,
+		);
+		const cropY = clamp(
+			Number.isFinite(y) ? Math.round(y) : 0,
+			0,
+			oldHeight - 1,
+		);
+		const cropWidth = clamp(
+			Number.isFinite(width) ? Math.round(width) : 1,
+			1,
+			oldWidth - cropX,
+		);
+		const cropHeight = clamp(
+			Number.isFinite(height) ? Math.round(height) : 1,
+			1,
+			oldHeight - cropY,
+		);
+		if (
+			cropX === 0 &&
+			cropY === 0 &&
+			cropWidth === oldWidth &&
+			cropHeight === oldHeight
+		) {
+			return false;
+		}
+
+		this.#applyCanvasTransform(cropWidth, cropHeight, (cel) =>
+			resizePixels(
+				cel,
+				oldWidth,
+				oldHeight,
+				cropWidth,
+				cropHeight,
+				-cropX,
+				-cropY,
+			),
+		);
+		return true;
+	}
+
+	/** Trims transparent borders around all painted content. */
+	cropToContent(): boolean {
+		const bounds = this.findContentBounds();
+		if (!bounds) return false;
+		return this.cropCanvasTo(
+			bounds.x,
+			bounds.y,
+			bounds.width,
+			bounds.height,
+		);
+	}
+
+	/** Crops to the smallest rectangle containing the selected pixels. */
+	cropToSelection(): boolean {
+		const bounds = this.selectionCropBounds();
+		if (!bounds) return false;
+		return this.cropCanvasTo(
+			bounds.x,
+			bounds.y,
+			bounds.width,
+			bounds.height,
+		);
 	}
 
 	selectFrame(

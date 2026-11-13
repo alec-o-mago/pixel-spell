@@ -26,7 +26,7 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 | 12 | Color-blindness simulation and palette preview | 5 | 2 | 2.50 | | Preview deuteranopia/protanopia/tritanopia and grayscale in the canvas without changing pixels. Useful for accessibility checks and palette design. |
 | 13 | ICO / favicon export | 5 | 2 | 2.50 | | Multi-size ICO encoder on top of the existing PNG export. Small, self-contained, and useful for web/game UI artists. |
 | 14 | Frame tags, per-frame durations, loop range ✓ | 9 | 4 | 2.25 | | Implemented: `Frame` carries optional `duration` and `tag`; `PixelDoc` carries an inclusive loop range. Tag ranges render above the frame headers, custom durations override the project FPS, playback uses per-frame timers, and GIF export honors durations and can export only the loop range. |
-| 15 | Canvas resize, crop, and nearest-neighbor scale | 9 | 4 | 2.25 | | Resample every cel with nearest-neighbor, anchor the crop, and make it undoable. Add presets and “scale ×2/×3”. A basic editor capability that is currently missing. |
+| 15 | Canvas resize, crop, and nearest-neighbor scale ✓ | 9 | 4 | 2.25 | | Implemented as a Project menu: **Scale Canvas** resamples every cel with nearest-neighbor and offers a preview, aspect lock, and ½×/1×/2×/3× presets; **Resize Canvas** crops or extends around a 3×3 anchor with transparent new pixels and a preview; **Crop to Content** trims transparent borders across all normal layers and frames; **Crop to Selection** uses the selection bounds. All operations are undoable and clear the selection. |
 | 16 | Multi-frame selection, copy/paste, and duplicate ✓ | 8 | 4 | 2.00 | | Implemented: shift-click selects a range and Ctrl/Cmd-click toggles frames. Copy/paste moves whole frames across layers, duplicate inserts copies with optional X/Y cel offsets, and the right-click menu exposes the same actions. |
 | 17 | Outline, drop shadow, and color-replace filters | 8 | 4 | 2.00 | | Selection-aware filters that operate on the active cel or all visible layers. Add a preview and an undoable apply step. High value for quick sprite cleanup. |
 | 18 | Rulers and draggable guides | 6 | 3 | 2.00 | | Horizontal/vertical guides with snapping, persisted per project. Reuse the mirror-guide overlay and pointer mapping. |
@@ -68,7 +68,7 @@ This is a prioritized backlog for Pixel Spell. Ratings are deliberately simple:
 2. Onion skinning — done
 3. Autosave and crash recovery — done
 4. Frame tags, per-frame durations, and loop range — done
-5. Canvas resize/crop/scale
+5. Canvas resize/crop/scale — done
 6. Palette tools (sort, ramps, lock)
 7. Sprite-sheet metadata export
 8. Frame reordering and multi-frame selection — done
