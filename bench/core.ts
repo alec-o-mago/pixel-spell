@@ -27,6 +27,7 @@ import {
 } from "../src/lib/editor/draw.js";
 import { exportGif } from "../src/lib/editor/export.js";
 import { parseProject, serializeProject } from "../src/lib/editor/file.js";
+import { sortPaletteColors } from "../src/lib/editor/palette.js";
 import {
 	lassoSelectionMask,
 	magicWandMask,
@@ -377,7 +378,42 @@ function assertCanvasSizePresets(): void {
 	}
 }
 
+function assertPaletteSorting(): void {
+	const colors = [
+		"#ff0000",
+		"#00ff00",
+		"#0000ff",
+		"#ffff00",
+		"#ff00ff",
+		"#00ffff",
+		"#000000",
+		"#ffffff",
+	];
+	const hue = sortPaletteColors(colors, "hue");
+	const expected = [
+		"#000000",
+		"#ffffff",
+		"#ff0000",
+		"#ffff00",
+		"#00ff00",
+		"#00ffff",
+		"#0000ff",
+		"#ff00ff",
+	];
+	if (hue.join() !== expected.join()) {
+		throw new Error("palette hue sort order changed");
+	}
+	const original = sortPaletteColors(colors, "original");
+	if (original.join() !== colors.join()) {
+		throw new Error("palette original order changed");
+	}
+	if (colors[0] !== "#ff0000") {
+		throw new Error("palette sorting mutated the source");
+	}
+}
+
 assertCanvasSizePresets();
+assertPaletteSorting();
 assertProjectRoundtrip(makeDoc(64, 64, 2, 3, 41), "sparse");
 const opaqueDoc = makeDoc(64, 64, 1, 1, 42);
 for (const cel of opaqueDoc.layers[0]!.cels) cel.fill(0xff336699);

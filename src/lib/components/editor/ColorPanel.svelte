@@ -4,8 +4,14 @@
 	import PaletteIcon from "@lucide/svelte/icons/palette";
 	import Pencil from "@lucide/svelte/icons/pencil";
 	import Plus from "@lucide/svelte/icons/plus";
+	import Settings2 from "@lucide/svelte/icons/settings-2";
 	import Trash2 from "@lucide/svelte/icons/trash-2";
-	import { Button } from "$lib/components/ui/button/index.js";
+	import PaletteLibraryDialog from "$lib/components/editor/PaletteLibraryDialog.svelte";
+	import {
+		Button,
+		buttonVariants,
+	} from "$lib/components/ui/button/index.js";
+	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import {
@@ -17,7 +23,10 @@
 		rgbToHsv,
 	} from "$lib/editor/color.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
-	import { MAX_PALETTE_COLORS } from "$lib/editor/palette.js";
+	import {
+		MAX_PALETTE_COLORS,
+		type PaletteSortMode,
+	} from "$lib/editor/palette.js";
 	import type { ColorSlot } from "$lib/editor/types.js";
 	import { cn } from "$lib/utils.js";
 
@@ -25,6 +34,13 @@
 
 	const HUE_TRACK =
 		"linear-gradient(to right, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)";
+
+	const SORT_OPTIONS: { id: PaletteSortMode; label: string }[] = [
+		{ id: "original", label: "Original order" },
+		{ id: "hue", label: "Hue" },
+		{ id: "saturation", label: "Saturation" },
+		{ id: "lightness", label: "Lightness" },
+	];
 
 	let svArea: HTMLDivElement | undefined;
 	let draggingSv = false;
@@ -182,6 +198,18 @@
 				? "Palette is empty"
 				: "Remove last color from palette",
 	);
+
+	let paletteLibraryOpen = $state(false);
+	let paletteSortMode = $derived(activePalette.sortMode ?? "original");
+	let hasPaletteDuplicates = $derived(
+		new Set(activePalette.colors).size !== activePalette.colors.length,
+	);
+	let canSortPalette = $derived(paletteEditable && paletteColorCount > 1);
+	let canDedupePalette = $derived(paletteEditable && hasPaletteDuplicates);
+
+	function onPaletteSortChange(value: string): void {
+		editor.sortPalette(activePalette.id, value as PaletteSortMode);
+	}
 
 	let renamingPalette = $state(false);
 	let renameDraft = $state("");
@@ -419,6 +447,52 @@
 					>
 						<PaletteIcon class="size-3.5" />
 					</Button>
+					<Separator orientation="vertical" class="mx-1 h-4" />
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger
+							class={cn(
+								buttonVariants({ variant: "ghost", size: "icon-xs" }),
+								"text-muted-foreground",
+							)}
+							title="Palette tools"
+							aria-label="Palette tools"
+						>
+							<Settings2 class="size-3.5" />
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content class="w-56" align="start">
+							<DropdownMenu.Label>Sort by</DropdownMenu.Label>
+							<DropdownMenu.RadioGroup
+								value={paletteSortMode}
+								onValueChange={onPaletteSortChange}
+							>
+								{#each SORT_OPTIONS as option (option.id)}
+									<DropdownMenu.RadioItem
+										value={option.id}
+										disabled={!canSortPalette}
+										closeOnSelect
+									>
+										{option.label}
+									</DropdownMenu.RadioItem>
+								{/each}
+							</DropdownMenu.RadioGroup>
+							<DropdownMenu.Separator />
+							<DropdownMenu.Item
+								disabled={!canDedupePalette}
+								title={canDedupePalette
+									? "Remove duplicate colors"
+									: "No duplicate colors"}
+								onSelect={() => editor.dedupePalette(activePalette.id)}
+							>
+								Remove duplicates
+							</DropdownMenu.Item>
+							<DropdownMenu.Separator />
+							<DropdownMenu.Item
+								onSelect={() => (paletteLibraryOpen = true)}
+							>
+								Palette library…
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 				</div>
 			</div>
 
@@ -517,4 +591,6 @@
 			</div>
 		</div>
 	</div>
+
+	<PaletteLibraryDialog bind:open={paletteLibraryOpen} />
 </section>

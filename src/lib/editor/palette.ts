@@ -1,4 +1,4 @@
-import { normalizeHex } from "./color.js";
+import { hexToRgb, normalizeHex, rgbToHsv } from "./color.js";
 import { uid } from "./doc.js";
 
 /**
@@ -44,10 +44,17 @@ export const MAX_PALETTE_COLORS = 256;
 export const DEFAULT_PALETTE_ID = "default";
 const STORAGE_KEY = "pixel-spell-palettes";
 
+/** How the color list is ordered. `original` is the add/import order. */
+export type PaletteSortMode = "original" | "hue" | "saturation" | "lightness";
+
 export interface Palette {
 	id: string;
 	name: string;
 	colors: string[];
+	/** Original add/import order, used by the "Original order" sort option. */
+	originalColors?: string[];
+	/** Last applied sort mode; missing means original order. */
+	sortMode?: PaletteSortMode;
 	/** The built-in palette cannot be renamed, deleted, or edited. */
 	builtin?: boolean;
 }
@@ -57,8 +64,58 @@ export function createDefaultPalette(): Palette {
 		id: DEFAULT_PALETTE_ID,
 		name: "Default",
 		colors: [...DEFAULT_PALETTE],
+		originalColors: [...DEFAULT_PALETTE],
+		sortMode: "original",
 		builtin: true,
 	};
+}
+
+export function isPaletteSortMode(value: unknown): value is PaletteSortMode {
+	return (
+		value === "original" ||
+		value === "hue" ||
+		value === "saturation" ||
+		value === "lightness"
+	);
+}
+
+/**
+ * Returns a sorted copy of a palette. Sorting is always based on the original
+ * add/import order, so choosing another mode does not depend on the previous
+ * sort. `original` simply returns a copy of that order.
+ */
+export function sortPaletteColors(
+	colors: string[],
+	mode: PaletteSortMode,
+): string[] {
+	if (mode === "original") return [...colors];
+
+	return colors
+		.map((color, index) => {
+			const hsv = rgbToHsv(hexToRgb(color));
+			const key: [number, number, number] =
+				mode === "hue"
+					? [hsv.h, hsv.s, hsv.v]
+					: mode === "saturation"
+						? [hsv.s, hsv.h, hsv.v]
+						: [hsv.v, hsv.h, hsv.s];
+			return { color, index, key };
+		})
+		.sort(
+			(a, b) =>
+				a.key[0] - b.key[0] ||
+				a.key[1] - b.key[1] ||
+				a.key[2] - b.key[2] ||
+				a.index - b.index,
+		)
+		.map((entry) => entry.color);
+}
+
+/** True when both arrays contain the same colors, regardless of order. */
+function sameColorSet(a: string[], b: string[]): boolean {
+	if (a.length !== b.length) return false;
+	const set = new Set(a);
+	return b.every((color) => set.has(color));
 }
 
 function normalizePaletteColors(value: unknown): string[] {
@@ -108,10 +165,22 @@ export function loadPaletteState(): { palettes: Palette[]; activeId: string } {
 					typeof rawPalette.name === "string" && rawPalette.name.trim()
 						? rawPalette.name.trim().slice(0, 40)
 						: `Palette ${palettes.length}`;
+				const colors = normalizePaletteColors(rawPalette.colors);
+				const savedOriginal = normalizePaletteColors(
+					rawPalette.originalColors,
+				);
+				const originalColors = sameColorSet(colors, savedOriginal)
+					? savedOriginal
+					: [...colors];
+				const sortMode = isPaletteSortMode(rawPalette.sortMode)
+					? rawPalette.sortMode
+					: "original";
 				palettes.push({
 					id,
 					name,
-					colors: normalizePaletteColors(rawPalette.colors),
+					colors,
+					originalColors,
+					sortMode,
 				});
 			}
 		}
@@ -136,6 +205,8 @@ export function savePaletteState(palettes: Palette[], activeId: string): void {
 				id: palette.id,
 				name: palette.name,
 				colors: [...palette.colors],
+				originalColors: [...(palette.originalColors ?? palette.colors)],
+				sortMode: palette.sortMode ?? "original",
 			}));
 		localStorage.setItem(STORAGE_KEY, JSON.stringify({ palettes: custom, activeId }));
 	} catch {

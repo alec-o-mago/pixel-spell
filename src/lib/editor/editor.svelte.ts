@@ -43,7 +43,9 @@ import {
 	createDefaultPalette,
 	loadPaletteState,
 	savePaletteState,
+	sortPaletteColors,
 	type Palette,
+	type PaletteSortMode,
 } from "./palette.js";
 import type {
 	BackgroundKind,
@@ -925,6 +927,8 @@ export class EditorState {
 			id: uid("palette"),
 			name: this.#nextPaletteName(),
 			colors: [],
+			originalColors: [],
+			sortMode: "original",
 		};
 		this.palettes.push(palette);
 		this.activePaletteId = palette.id;
@@ -963,6 +967,16 @@ export class EditorState {
 		if (palette.colors.length >= MAX_PALETTE_COLORS) return;
 
 		palette.colors.push(color);
+		palette.originalColors ??= [...palette.colors];
+		if (!palette.originalColors.includes(color)) {
+			palette.originalColors.push(color);
+		}
+		if (palette.sortMode && palette.sortMode !== "original") {
+			palette.colors = sortPaletteColors(
+				palette.originalColors,
+				palette.sortMode,
+			);
+		}
 		this.#persistPalettes();
 	}
 
@@ -970,14 +984,62 @@ export class EditorState {
 		const palette = this.activePalette;
 		if (palette.builtin) return;
 		if (index < 0 || index >= palette.colors.length) return;
-		palette.colors.splice(index, 1);
-		this.#persistPalettes();
+		this.#removePaletteColorAt(palette, index);
 	}
 
 	removeLastPaletteColor(): void {
 		const palette = this.activePalette;
 		if (palette.builtin || palette.colors.length === 0) return;
-		palette.colors.pop();
+		this.#removePaletteColorAt(palette, palette.colors.length - 1);
+	}
+
+	#removePaletteColorAt(palette: Palette, index: number): void {
+		const [removed] = palette.colors.splice(index, 1);
+		if (removed === undefined) return;
+
+		const originalColors = palette.originalColors ?? [...palette.colors];
+		const originalIndex = originalColors.indexOf(removed);
+		if (originalIndex >= 0) originalColors.splice(originalIndex, 1);
+		palette.originalColors = originalColors;
+
+		if (palette.sortMode && palette.sortMode !== "original") {
+			palette.colors = sortPaletteColors(originalColors, palette.sortMode);
+		}
+		this.#persistPalettes();
+	}
+
+	/** Sorts a custom palette without losing its original add/import order. */
+	sortPalette(id: string, mode: PaletteSortMode): void {
+		const palette = this.palettes.find((item) => item.id === id);
+		if (!palette || palette.builtin) return;
+
+		const original = palette.originalColors ?? palette.colors;
+		palette.originalColors = [...original];
+		palette.colors = sortPaletteColors(original, mode);
+		palette.sortMode = mode;
+		this.#persistPalettes();
+	}
+
+	/** Removes duplicate colors from a custom palette and its original order. */
+	dedupePalette(id: string): void {
+		const palette = this.palettes.find((item) => item.id === id);
+		if (!palette || palette.builtin) return;
+
+		const colors = [...new Set(palette.colors)];
+		const originalColors = [
+			...new Set(palette.originalColors ?? palette.colors),
+		];
+		const unchanged =
+			colors.length === palette.colors.length &&
+			originalColors.length ===
+				(palette.originalColors?.length ?? palette.colors.length);
+		if (unchanged) return;
+
+		palette.originalColors = originalColors;
+		palette.colors =
+			palette.sortMode && palette.sortMode !== "original"
+				? sortPaletteColors(originalColors, palette.sortMode)
+				: colors;
 		this.#persistPalettes();
 	}
 
@@ -1006,6 +1068,8 @@ export class EditorState {
 			id: uid("palette"),
 			name: paletteName,
 			colors: unique,
+			originalColors: [...unique],
+			sortMode: "original",
 		};
 		this.palettes.push(palette);
 		this.activePaletteId = palette.id;
