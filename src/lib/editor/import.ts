@@ -1,3 +1,4 @@
+import { MAX_CANVAS_SIZE } from "./canvas.js";
 import { normalizeHex, rgbToHex } from "./color.js";
 import { MAX_PALETTE_COLORS } from "./palette.js";
 
@@ -28,7 +29,7 @@ export const IMPORT_ACCEPT = [...IMAGE_IMPORT_EXTENSIONS, ...PALETTE_EXTENSIONS]
 	.join(",");
 
 /** Imported images are cropped to this many pixels in each dimension. */
-export const MAX_IMPORT_DIMENSION = 1024;
+export const MAX_IMPORT_DIMENSION = MAX_CANVAS_SIZE;
 
 /** Reject huge files before decoding them in memory. */
 export const MAX_IMPORT_FILE_BYTES = 64 * 1024 * 1024;

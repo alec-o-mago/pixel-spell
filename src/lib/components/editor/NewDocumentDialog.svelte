@@ -1,14 +1,29 @@
 <script lang="ts">
-	import { Button } from "$lib/components/ui/button/index.js";
+	import ChevronDown from "@lucide/svelte/icons/chevron-down";
+	import {
+		Button,
+		buttonVariants,
+	} from "$lib/components/ui/button/index.js";
 	import * as Dialog from "$lib/components/ui/dialog/index.js";
+	import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
 	import { Input } from "$lib/components/ui/input/index.js";
 	import { Label } from "$lib/components/ui/label/index.js";
+	import {
+		MAX_CANVAS_SIZE,
+		MIN_CANVAS_SIZE,
+	} from "$lib/editor/canvas.js";
+	import {
+		CANVAS_SIZE_PRESETS,
+		RETRO_CANVAS_PRESETS,
+		SQUARE_CANVAS_PRESETS,
+		type CanvasSizePreset,
+	} from "$lib/editor/canvas-presets.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import type { BackgroundKind } from "$lib/editor/types.js";
+	import { cn } from "$lib/utils.js";
 
 	let { open = $bindable(false) } = $props();
 
-	const presets = [16, 32, 64, 128];
 	const backgrounds: { id: BackgroundKind; label: string; swatch: string }[] = [
 		{ id: "transparent", label: "Transparent", swatch: "alpha-checker" },
 		{ id: "white", label: "White", swatch: "bg-white" },
@@ -18,14 +33,39 @@
 	let width = $state(32);
 	let height = $state(32);
 	let background = $state<BackgroundKind>("transparent");
+	let wasOpen = false;
+
+	let selectedPreset = $derived(
+		CANVAS_SIZE_PRESETS.find(
+			(preset) => preset.width === width && preset.height === height,
+		) ?? null,
+	);
+	let sizeLabel = $derived(
+		selectedPreset
+			? `${selectedPreset.width}×${selectedPreset.height}`
+			: Number.isFinite(width) && Number.isFinite(height)
+				? `${width}×${height}`
+				: "Custom",
+	);
+	let nameLabel = $derived(selectedPreset?.name ?? "Custom size");
 
 	$effect(() => {
-		if (!open) return;
+		if (!open) {
+			wasOpen = false;
+			return;
+		}
+		if (wasOpen) return;
+		wasOpen = true;
 		name = "";
 		width = editor.doc.width;
 		height = editor.doc.height;
 		background = "transparent";
 	});
+
+	function applyPreset(preset: CanvasSizePreset): void {
+		width = preset.width;
+		height = preset.height;
+	}
 
 	function create(): void {
 		const w = Number.isFinite(width) ? width : 32;
@@ -34,6 +74,24 @@
 		open = false;
 	}
 </script>
+
+{#snippet sizeItem(preset: CanvasSizePreset)}
+	<DropdownMenu.Item
+		class={cn(
+			"justify-between gap-4",
+			selectedPreset?.id === preset.id && "bg-accent text-accent-foreground",
+		)}
+		onSelect={() => applyPreset(preset)}
+	>
+		<span class="tabular-nums">{preset.width}×{preset.height}</span>
+		<span
+			class="min-w-0 truncate text-right text-xs text-muted-foreground"
+			title={preset.name}
+		>
+			{preset.name}
+		</span>
+	</DropdownMenu.Item>
+{/snippet}
 
 <Dialog.Root bind:open>
 	<Dialog.Content class="sm:max-w-md">
@@ -57,20 +115,35 @@
 				/>
 			</div>
 
-			<div class="grid grid-cols-4 gap-2">
-				{#each presets as preset (preset)}
-					<Button
-						variant={width === preset && height === preset ? "default" : "outline"}
-						size="sm"
-						class="tabular-nums"
-						onclick={() => {
-							width = preset;
-							height = preset;
-						}}
+			<div class="grid gap-1.5">
+				<Label for="new-canvas-size">Canvas size</Label>
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger
+						id="new-canvas-size"
+						class={cn(
+							buttonVariants({ variant: "outline", size: "default" }),
+							"w-full justify-between font-normal",
+						)}
+						aria-label={`Canvas size: ${sizeLabel} ${nameLabel}`}
 					>
-						{preset}×{preset}
-					</Button>
-				{/each}
+						<span class="tabular-nums">{sizeLabel}</span>
+						<span class="flex min-w-0 items-center gap-2">
+							<span class="truncate text-xs text-muted-foreground">{nameLabel}</span>
+							<ChevronDown class="size-4 shrink-0 text-muted-foreground" />
+						</span>
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content class="max-h-80" align="start">
+						<DropdownMenu.Label>Square sizes</DropdownMenu.Label>
+						{#each SQUARE_CANVAS_PRESETS as preset (preset.id)}
+							{@render sizeItem(preset)}
+						{/each}
+						<DropdownMenu.Separator />
+						<DropdownMenu.Label>Retro hardware</DropdownMenu.Label>
+						{#each RETRO_CANVAS_PRESETS as preset (preset.id)}
+							{@render sizeItem(preset)}
+						{/each}
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
 			</div>
 
 			<div class="grid grid-cols-2 gap-3">
@@ -79,8 +152,8 @@
 					<Input
 						id="new-width"
 						type="number"
-						min={1}
-						max={1024}
+						min={MIN_CANVAS_SIZE}
+						max={MAX_CANVAS_SIZE}
 						bind:value={width}
 						class="tabular-nums"
 					/>
@@ -90,8 +163,8 @@
 					<Input
 						id="new-height"
 						type="number"
-						min={1}
-						max={1024}
+						min={MIN_CANVAS_SIZE}
+						max={MAX_CANVAS_SIZE}
 						bind:value={height}
 						class="tabular-nums"
 					/>
@@ -123,8 +196,9 @@
 			</div>
 
 			<p class="text-xs text-muted-foreground">
-				Canvas size can be between 1 and 1024 pixels. This opens a new project tab and
-				keeps the current project open. Leave the name blank to use the next Untitled name.
+				Canvas size can be between {MIN_CANVAS_SIZE} and {MAX_CANVAS_SIZE} pixels. This opens
+				a new project tab and keeps the current project open. Leave the name blank to use the
+				next Untitled name.
 			</p>
 		</div>
 

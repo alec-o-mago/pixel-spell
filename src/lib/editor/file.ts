@@ -1,3 +1,4 @@
+import { MAX_CANVAS_SIZE } from "./canvas.js";
 import { normalizeHex } from "./color.js";
 import { MAX_FRAME_DURATION, MIN_FRAME_DURATION, uid } from "./doc.js";
 import {
@@ -23,7 +24,6 @@ const METHOD_RLE = 1;
 const HEADER_SIZE = 4 + 1 + 1 + 2 + 2 + 1 + 2 + 2 + 4;
 export const MAX_PROJECT_LAYERS = 1024;
 export const MAX_PROJECT_FRAMES = 1000;
-const MAX_DIMENSION = 1024;
 /** Refuse pathological files before allocating their cel buffers. */
 const MAX_TOTAL_CEL_BYTES = 512 * 1024 * 1024;
 const MAX_PROJECT_FILE_BYTES = 512 * 1024 * 1024;
@@ -400,9 +400,9 @@ function parseProjectBinary(bytes: Uint8Array): LoadedProject | null {
 
 	if (
 		width < 1 ||
-		width > MAX_DIMENSION ||
+		width > MAX_CANVAS_SIZE ||
 		height < 1 ||
-		height > MAX_DIMENSION ||
+		height > MAX_CANVAS_SIZE ||
 		frameCount < 1 ||
 		frameCount > MAX_PROJECT_FRAMES ||
 		layerCount < 1 ||

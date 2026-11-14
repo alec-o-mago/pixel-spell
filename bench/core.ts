@@ -7,6 +7,8 @@
  * The harness bundles this file with rolldown and executes it in Node so the
  * exact TypeScript sources used by the app are measured.
  */
+import { MAX_CANVAS_SIZE } from "../src/lib/editor/canvas.js";
+import { CANVAS_SIZE_PRESETS } from "../src/lib/editor/canvas-presets.js";
 import { packColor } from "../src/lib/editor/color.js";
 import {
 	cloneDoc,
@@ -353,6 +355,29 @@ function assertProjectRoundtrip(doc: PixelDoc, label: string): void {
 	}
 }
 
+function assertCanvasSizePresets(): void {
+	const keys = new Set<string>();
+	for (const preset of CANVAS_SIZE_PRESETS) {
+		const key = `${preset.width}x${preset.height}`;
+		if (keys.has(key)) throw new Error(`duplicate canvas size preset: ${key}`);
+		keys.add(key);
+		if (
+			preset.width < 1 ||
+			preset.height < 1 ||
+			preset.width > MAX_CANVAS_SIZE ||
+			preset.height > MAX_CANVAS_SIZE
+		) {
+			throw new Error(`canvas size preset out of range: ${key}`);
+		}
+	}
+	for (let size = 8; size <= 1024; size *= 2) {
+		if (!keys.has(`${size}x${size}`)) {
+			throw new Error(`missing power-of-two canvas preset: ${size}x${size}`);
+		}
+	}
+}
+
+assertCanvasSizePresets();
 assertProjectRoundtrip(makeDoc(64, 64, 2, 3, 41), "sparse");
 const opaqueDoc = makeDoc(64, 64, 1, 1, 42);
 for (const cel of opaqueDoc.layers[0]!.cels) cel.fill(0xff336699);

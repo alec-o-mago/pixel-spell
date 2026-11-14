@@ -5,14 +5,16 @@
 	import { Label } from "$lib/components/ui/label/index.js";
 	import { Switch } from "$lib/components/ui/switch/index.js";
 	import CanvasTransformPreview from "$lib/components/editor/CanvasTransformPreview.svelte";
-	import { scalePixelsNearest } from "$lib/editor/canvas.js";
+	import {
+		MAX_CANVAS_SIZE,
+		MIN_CANVAS_SIZE,
+		scalePixelsNearest,
+	} from "$lib/editor/canvas.js";
 	import { compositeFrameCached } from "$lib/editor/doc.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 
 	let { open = $bindable(false) } = $props();
 
-	const MIN_SIZE = 1;
-	const MAX_SIZE = 1024;
 	const PRESETS = [
 		{ label: "½×", factor: 0.5 },
 		{ label: "1×", factor: 1 },
@@ -30,11 +32,11 @@
 	let height = $derived(Number(heightText));
 	let valid = $derived(
 		Number.isInteger(width) &&
-			width >= MIN_SIZE &&
-			width <= MAX_SIZE &&
+			width >= MIN_CANVAS_SIZE &&
+			width <= MAX_CANVAS_SIZE &&
 			Number.isInteger(height) &&
-			height >= MIN_SIZE &&
-			height <= MAX_SIZE,
+			height >= MIN_CANVAS_SIZE &&
+			height <= MAX_CANVAS_SIZE,
 	);
 	let unchanged = $derived(
 		valid && width === editor.doc.width && height === editor.doc.height,
@@ -64,7 +66,7 @@
 	});
 
 	function clampDimension(value: number): number {
-		return Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(value)));
+		return Math.max(MIN_CANVAS_SIZE, Math.min(MAX_CANVAS_SIZE, Math.round(value)));
 	}
 
 	function setWidth(value: string): void {
@@ -156,8 +158,8 @@
 				<Input
 					id="scale-width"
 					type="number"
-					min={MIN_SIZE}
-					max={MAX_SIZE}
+					min={MIN_CANVAS_SIZE}
+					max={MAX_CANVAS_SIZE}
 					step={1}
 					value={widthText}
 					oninput={(event) => setWidth(event.currentTarget.value)}
@@ -169,8 +171,8 @@
 				<Input
 					id="scale-height"
 					type="number"
-					min={MIN_SIZE}
-					max={MAX_SIZE}
+					min={MIN_CANVAS_SIZE}
+					max={MAX_CANVAS_SIZE}
 					step={1}
 					value={heightText}
 					oninput={(event) => setHeight(event.currentTarget.value)}
@@ -191,7 +193,7 @@
 
 		{#if !valid}
 			<p class="text-xs text-destructive">
-				Width and height must be whole numbers from {MIN_SIZE} to {MAX_SIZE}.
+				Width and height must be whole numbers from {MIN_CANVAS_SIZE} to {MAX_CANVAS_SIZE}.
 			</p>
 		{/if}
 

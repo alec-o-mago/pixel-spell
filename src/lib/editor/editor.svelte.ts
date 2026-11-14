@@ -4,6 +4,8 @@ import {
 	writeAutosave,
 } from "./autosave.js";
 import {
+	MAX_CANVAS_SIZE,
+	MIN_CANVAS_SIZE,
 	type PixelBounds,
 	contentBoundsOf,
 	resizePixels,
@@ -65,8 +67,6 @@ import type {
 const HISTORY_LIMIT = 80;
 /** Keep undo history bounded even for very large documents. */
 const HISTORY_BYTE_LIMIT = 128 * 1024 * 1024;
-const MIN_SIZE = 1;
-const MAX_SIZE = 1024;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 64;
 
@@ -1480,8 +1480,8 @@ export class EditorState {
 		height: number,
 		options: { name?: string; background?: BackgroundKind } = {},
 	): void {
-		const w = clamp(Math.round(width) || 32, MIN_SIZE, MAX_SIZE);
-		const h = clamp(Math.round(height) || 32, MIN_SIZE, MAX_SIZE);
+		const w = clamp(Math.round(width) || 32, MIN_CANVAS_SIZE, MAX_CANVAS_SIZE);
+		const h = clamp(Math.round(height) || 32, MIN_CANVAS_SIZE, MAX_CANVAS_SIZE);
 		const doc = createDoc(w, h, options.background ?? "transparent");
 		const requestedName = options.name?.trim().slice(0, 60);
 		const name = requestedName || this.#nextUntitledName();
@@ -1556,8 +1556,8 @@ export class EditorState {
 		height: number;
 		pixels: Uint32Array;
 	}): void {
-		const width = clamp(Math.round(image.width) || 1, MIN_SIZE, MAX_SIZE);
-		const height = clamp(Math.round(image.height) || 1, MIN_SIZE, MAX_SIZE);
+		const width = clamp(Math.round(image.width) || 1, MIN_CANVAS_SIZE, MAX_CANVAS_SIZE);
+		const height = clamp(Math.round(image.height) || 1, MIN_CANVAS_SIZE, MAX_CANVAS_SIZE);
 		const pixels = new Uint32Array(width * height);
 		pixels.set(image.pixels.subarray(0, Math.min(image.pixels.length, pixels.length)));
 
@@ -2205,14 +2205,14 @@ export class EditorState {
 	/** Resamples every cel to the new dimensions with nearest-neighbor scaling. */
 	scaleCanvas(width: number, height: number): boolean {
 		const nextWidth = clamp(
-			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
-			MIN_SIZE,
-			MAX_SIZE,
+			Number.isFinite(width) ? Math.round(width) : MIN_CANVAS_SIZE,
+			MIN_CANVAS_SIZE,
+			MAX_CANVAS_SIZE,
 		);
 		const nextHeight = clamp(
-			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
-			MIN_SIZE,
-			MAX_SIZE,
+			Number.isFinite(height) ? Math.round(height) : MIN_CANVAS_SIZE,
+			MIN_CANVAS_SIZE,
+			MAX_CANVAS_SIZE,
 		);
 		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
 			return false;
@@ -2237,14 +2237,14 @@ export class EditorState {
 		anchorY = 0.5,
 	): boolean {
 		const nextWidth = clamp(
-			Number.isFinite(width) ? Math.round(width) : MIN_SIZE,
-			MIN_SIZE,
-			MAX_SIZE,
+			Number.isFinite(width) ? Math.round(width) : MIN_CANVAS_SIZE,
+			MIN_CANVAS_SIZE,
+			MAX_CANVAS_SIZE,
 		);
 		const nextHeight = clamp(
-			Number.isFinite(height) ? Math.round(height) : MIN_SIZE,
-			MIN_SIZE,
-			MAX_SIZE,
+			Number.isFinite(height) ? Math.round(height) : MIN_CANVAS_SIZE,
+			MIN_CANVAS_SIZE,
+			MAX_CANVAS_SIZE,
 		);
 		if (nextWidth === this.doc.width && nextHeight === this.doc.height) {
 			return false;

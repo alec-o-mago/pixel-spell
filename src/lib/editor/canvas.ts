@@ -1,5 +1,10 @@
 import type { PixelDoc } from "./types.js";
 
+/** Smallest supported canvas dimension in either direction. */
+export const MIN_CANVAS_SIZE = 1;
+/** Largest supported canvas dimension in either direction. */
+export const MAX_CANVAS_SIZE = 2048;
+
 export interface PixelBounds {
 	x: number;
 	y: number;

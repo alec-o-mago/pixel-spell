@@ -4,15 +4,17 @@
 	import { Input } from "$lib/components/ui/input/index.js";
 	import { Label } from "$lib/components/ui/label/index.js";
 	import CanvasTransformPreview from "$lib/components/editor/CanvasTransformPreview.svelte";
-	import { resizePixels } from "$lib/editor/canvas.js";
+	import {
+		MAX_CANVAS_SIZE,
+		MIN_CANVAS_SIZE,
+		resizePixels,
+	} from "$lib/editor/canvas.js";
 	import { compositeFrameCached } from "$lib/editor/doc.js";
 	import { editor } from "$lib/editor/editor.svelte.js";
 	import { cn } from "$lib/utils.js";
 
 	let { open = $bindable(false) } = $props();
 
-	const MIN_SIZE = 1;
-	const MAX_SIZE = 1024;
 	const ANCHORS = [
 		{ id: "top-left", label: "Top left", x: 0, y: 0 },
 		{ id: "top", label: "Top center", x: 0.5, y: 0 },
@@ -35,11 +37,11 @@
 	let height = $derived(Number(heightText));
 	let valid = $derived(
 		Number.isInteger(width) &&
-			width >= MIN_SIZE &&
-			width <= MAX_SIZE &&
+			width >= MIN_CANVAS_SIZE &&
+			width <= MAX_CANVAS_SIZE &&
 			Number.isInteger(height) &&
-			height >= MIN_SIZE &&
-			height <= MAX_SIZE,
+			height >= MIN_CANVAS_SIZE &&
+			height <= MAX_CANVAS_SIZE,
 	);
 	let unchanged = $derived(
 		valid && width === editor.doc.width && height === editor.doc.height,
@@ -123,8 +125,8 @@
 					<Input
 						id="resize-width"
 						type="number"
-						min={MIN_SIZE}
-						max={MAX_SIZE}
+						min={MIN_CANVAS_SIZE}
+						max={MAX_CANVAS_SIZE}
 						step={1}
 						value={widthText}
 						oninput={(event) => (widthText = event.currentTarget.value)}
@@ -136,8 +138,8 @@
 					<Input
 						id="resize-height"
 						type="number"
-						min={MIN_SIZE}
-						max={MAX_SIZE}
+						min={MIN_CANVAS_SIZE}
+						max={MAX_CANVAS_SIZE}
 						step={1}
 						value={heightText}
 						oninput={(event) => (heightText = event.currentTarget.value)}
@@ -181,7 +183,7 @@
 
 		{#if !valid}
 			<p class="text-xs text-destructive">
-				Width and height must be whole numbers from {MIN_SIZE} to {MAX_SIZE}.
+				Width and height must be whole numbers from {MIN_CANVAS_SIZE} to {MAX_CANVAS_SIZE}.
 			</p>
 		{/if}
 
